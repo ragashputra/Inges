@@ -139,7 +139,63 @@ function renderAcctChip() {
       ${state.userPicture ? `<img src="${state.userPicture}" alt="">` : '<span class="acct-dot"></span>'}
       <span>${(state.userEmail || 'Akun').split('@')[0]}</span>
     </button>`;
-  $('#acctChipBtn').addEventListener('click', () => openModal('#setupModal', true));
+  $('#acctChipBtn').addEventListener('click', openAcctModal);
+}
+
+function openAcctModal() {
+  $('#acctModalEmail').textContent = state.userEmail || 'Akun Google';
+  $('#acctModalSheet').textContent = state.activeSheetName
+    ? `Terhubung ke sheet ${state.activeSheetName}`
+    : 'Spreadsheet belum terhubung';
+
+  const pic = $('#acctModalPic');
+  const dot = $('#acctModalDot');
+  if (state.userPicture) {
+    pic.src = state.userPicture;
+    pic.classList.remove('hidden');
+    dot.classList.add('hidden');
+  } else {
+    pic.classList.add('hidden');
+    dot.classList.remove('hidden');
+  }
+  openModal('#acctModal');
+}
+
+function setupAcctModal() {
+  $('#acctModal').addEventListener('click', (e) => { if (e.target.id === 'acctModal') closeModal('#acctModal'); });
+
+  $('#btnChangeSheet').addEventListener('click', () => {
+    closeModal('#acctModal');
+    openModal('#setupModal');
+  });
+
+  $('#btnLogout').addEventListener('click', doLogout);
+}
+
+function doLogout() {
+  closeModal('#acctModal');
+  const token = state.accessToken;
+
+  const finishLogout = () => {
+    localStorage.removeItem(STORAGE_KEYS.token);
+    localStorage.removeItem(STORAGE_KEYS.tokenExp);
+    state.accessToken = null;
+    state.userEmail = null;
+    state.userPicture = null;
+    state.activeSheetName = null;
+
+    $('#acctArea').innerHTML = '';
+    $('#mainContent').classList.add('hidden');
+    $('#bottomnav').classList.add('hidden');
+    $('#gate').classList.remove('hidden');
+    toast('Berhasil logout.', 'success');
+  };
+
+  if (token && window.google && google.accounts && google.accounts.oauth2) {
+    google.accounts.oauth2.revoke(token, finishLogout);
+  } else {
+    finishLogout();
+  }
 }
 
 /* =========================================================================
@@ -727,10 +783,84 @@ function renderSessionLog() {
    MODALS
    ========================================================================= */
 function openModal(sel) {
-  $(sel).classList.add('show');
+  const backdrop = $(sel);
+  const sheet = backdrop.querySelector('.modal-sheet');
+  if (sheet) {
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+  }
+  backdrop.classList.add('show');
 }
 function closeModal(sel) {
   $(sel).classList.remove('show');
+}
+
+/* =========================================================================
+   DRAG-TO-DISMISS (semua .modal-sheet)
+   Bisa ditarik turun dari handle atau dari area sheet yang sedang tidak
+   di-scroll, buat nutup modal atau geser modal yang tampilannya kepotong.
+   ========================================================================= */
+function setupModalDrag() {
+  $$('.modal-backdrop').forEach(backdrop => {
+    const sheet = backdrop.querySelector('.modal-sheet');
+    if (!sheet) return;
+
+    let dragging = false;
+    let startY = 0;
+    let deltaY = 0;
+
+    const isBlockedTarget = (el) => {
+      if (el.closest('.modal-handle')) return false; // handle selalu boleh drag
+      return !!el.closest('input, textarea, select, button, .chip-opt');
+    };
+
+    const start = (y, target) => {
+      if (sheet.scrollTop > 2) return false;      // sheet lagi di-scroll, jangan rebut gesture
+      if (isBlockedTarget(target)) return false;   // hindari bentrok sama tap tombol/isi form
+      dragging = true;
+      startY = y;
+      deltaY = 0;
+      sheet.classList.add('dragging');
+      return true;
+    };
+    const move = (y) => {
+      if (!dragging) return;
+      const d = y - startY;
+      deltaY = d > 0 ? d : 0;
+      sheet.style.transform = `translateY(${deltaY}px)`;
+    };
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      sheet.classList.remove('dragging');
+      const threshold = Math.min(140, sheet.offsetHeight * 0.3);
+      const shouldClose = deltaY > threshold;
+      sheet.style.transform = '';
+      deltaY = 0;
+      if (shouldClose) {
+        // modal setup awal (belum ada spreadsheet) wajib diisi dulu, tidak bisa di-drag tutup
+        if (backdrop.id === 'setupModal' && !state.spreadsheetId) return;
+        closeModal(`#${backdrop.id}`);
+      }
+    };
+
+    sheet.addEventListener('touchstart', (e) => start(e.touches[0].clientY, e.target), { passive: true });
+    sheet.addEventListener('touchmove', (e) => { if (dragging) move(e.touches[0].clientY); }, { passive: true });
+    sheet.addEventListener('touchend', end);
+    sheet.addEventListener('touchcancel', end);
+
+    sheet.addEventListener('mousedown', (e) => {
+      if (!start(e.clientY, e.target)) return;
+      const onMouseMove = (ev) => move(ev.clientY);
+      const onMouseUp = () => {
+        end();
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  });
 }
 
 function setupModals() {
@@ -806,6 +936,8 @@ function init() {
   setupDropzone();
   setupManualForm();
   setupModals();
+  setupAcctModal();
+  setupModalDrag();
   setupTabs();
 
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
