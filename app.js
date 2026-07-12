@@ -882,6 +882,8 @@ function setupModals() {
 
   $('#riwayatModal').addEventListener('click', (e) => { if (e.target.id === 'riwayatModal') closeModal('#riwayatModal'); });
 
+  setupSheetIdAutoclean();
+
   $('#btnSetupSave').addEventListener('click', async () => {
     const raw = $('#setupSheetId').value.trim();
     const id = extractSheetIdFromInput(raw);
@@ -895,6 +897,27 @@ function setupModals() {
   $('#setupModal').addEventListener('click', (e) => {
     if (e.target.id === 'setupModal' && state.spreadsheetId) closeModal('#setupModal');
   });
+}
+
+/**
+ * Kalau user paste link Google Sheets penuh (atau drag-drop / autofill dari browser),
+ * field otomatis dirapikan jadi ID-nya doang, biar nggak perlu strip manual.
+ */
+function setupSheetIdAutoclean() {
+  const input = $('#setupSheetId');
+  const clean = () => {
+    const raw = input.value.trim();
+    if (!raw) return;
+    const looksLikeUrl = raw.includes('docs.google.com') || raw.includes('/d/');
+    if (!looksLikeUrl) return;
+    const id = extractSheetIdFromInput(raw);
+    if (id && id !== raw) {
+      input.value = id;
+      toast('Link dirapikan jadi ID spreadsheet.', 'success', 2200);
+    }
+  };
+  input.addEventListener('paste', () => setTimeout(clean, 0));
+  input.addEventListener('blur', clean);
 }
 
 function extractSheetIdFromInput(input) {
