@@ -643,19 +643,28 @@ input[type=file]{display:none;}
 
       <!-- tabs -->
       <div class="tabs">
-        <button class="tab active" id="tabImport" data-tab="import">Import Otomatis</button>
-        <button class="tab" id="tabManual" data-tab="manual">Input Manual</button>
+        <button class="tab active" id="tabImport" data-tab="import">Cek Fisik Keluar</button>
+        <button class="tab" id="tabManual" data-tab="manual">Cek Fisik Masuk</button>
         <div class="tab-indicator" id="tabIndicator"></div>
       </div>
 
-      <!-- ===== PANEL: IMPORT ===== -->
+      <!-- ===== PANEL: IMPORT (Cek Fisik Keluar) ===== -->
       <div class="panel active" id="panelImport">
         <div class="card">
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Unggah Listing Penjualan
+            Cek Fisik Keluar
           </h3>
-          <p class="card-desc">Pilih file CSV export dari program penjualan. Inges akan mengelompokkan otomatis per tanggal &mdash; setiap faktur terpakai 2 pcs cek fisik.</p>
+          <p class="card-desc">Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal &mdash; setiap faktur terpakai 2 pcs cek fisik.</p>
+
+          <div class="field" style="margin-bottom:16px;">
+            <label>Tulis ke Sheet Bulan</label>
+            <div class="select-wrap">
+              <select id="importSheetSelect">
+                <option value="">Memuat daftar sheet…</option>
+              </select>
+            </div>
+          </div>
 
           <div class="dropzone" id="dropzone">
             <div class="dz-icon">
@@ -690,12 +699,12 @@ input[type=file]{display:none;}
         </button>
       </div>
 
-      <!-- ===== PANEL: MANUAL ===== -->
+      <!-- ===== PANEL: MANUAL (Cek Fisik Masuk) ===== -->
       <div class="panel" id="panelManual">
         <div class="card">
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Tambah Stok (Credit)
+            Cek Fisik Masuk
           </h3>
           <p class="card-desc">Untuk penambahan cek fisik baru dari SP-DRI, SP-CF, atau sumber lain di luar penjualan.</p>
 

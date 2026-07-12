@@ -423,6 +423,7 @@ async function loadActiveSheetContext(overrideSheetName) {
     }
 
     updateSummary(currentSaldo, totalCredit, totalDebit);
+    populateImportSheetSelect();
 
     // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
     // kemungkinan besar butuh diperbaiki manual di sheet (mis. locale formula lama).
@@ -435,6 +436,45 @@ async function loadActiveSheetContext(overrideSheetName) {
     console.error(e);
     toast(e.message || 'Gagal membaca spreadsheet.', 'error');
   }
+}
+
+/**
+ * Isi dropdown pemilihan sheet tujuan di panel Cek Fisik Keluar (import CSV),
+ * supaya pengguna bisa memastikan / mengganti bulan tujuan sebelum menulis —
+ * tidak melulu bergantung pada auto-detect bulan berjalan.
+ */
+function populateImportSheetSelect() {
+  const select = $('#importSheetSelect');
+  if (!select) return;
+  if (!state.availableSheets.length) {
+    select.innerHTML = '<option value="">Tidak ada sheet ditemukan</option>';
+    return;
+  }
+  const ordered = state.availableSheets.slice().reverse(); // sheet terbaru duluan
+  select.innerHTML = ordered.map(name =>
+    `<option value="${name}" ${name === state.activeSheetName ? 'selected' : ''}>${name}</option>`
+  ).join('');
+}
+
+function setupImportSheetSelect() {
+  const select = $('#importSheetSelect');
+  if (!select) return;
+  select.addEventListener('change', async () => {
+    const chosen = select.value;
+    if (!chosen || chosen === state.activeSheetName) return;
+
+    // Preview yang sudah dihitung berasal dari konteks sheet lama (row target beda),
+    // jadi harus direset supaya tidak salah tulis ke sheet yang baru dipilih.
+    const hadPreview = state.parsedDays.length > 0;
+    resetImportPanel();
+
+    toast(`Berpindah ke sheet ${chosen}…`, 'success', 1800);
+    await loadActiveSheetContext(chosen);
+
+    if (hadPreview) {
+      toast('Pratinjau sebelumnya direset — silakan upload ulang CSV untuk sheet ini.', 'success', 3500);
+    }
+  });
 }
 
 function updateSummary(saldo, credit, debit) {
@@ -1142,6 +1182,7 @@ function init() {
   setupTabs();
   setupBottomNav();
   setupThemeToggle();
+  setupImportSheetSelect();
 
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
 
