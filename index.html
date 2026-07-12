@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>Inges — Input Gesek</title>
+<meta name="description" content="Input otomatis rekap cek fisik dari data penjualan ke Google Sheets">
+<meta name="theme-color" content="#0B0F0D">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Inges">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+:root{
+  --ink-0:#0B0F0D;
+  --ink-1:#121611;
+  --ink-2:#171D17;
+  --ink-3:#212821;
+  --line:#293029;
+  --line-soft:#1D231D;
+  --paper:#F5F3EE;
+  --paper-dim:#B8C2B6;
+  --paper-faint:#7C877C;
+  --sage:#A3B899;
+  --forest:#3D6B4A;
+  --forest-bright:#4E8560;
+  --amber:#D4A24C;
+  --rust:#C4634A;
+  --rust-bright:#DD7A5F;
+
+  --font-display:'Space Grotesk', sans-serif;
+  --font-body:'Inter', sans-serif;
+
+  --radius-sm:10px;
+  --radius-md:16px;
+  --radius-lg:22px;
+  --radius-full:999px;
+
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --dur-fast: 160ms;
+  --dur-med: 320ms;
+  --dur-slow: 560ms;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{
+  margin:0; padding:0; height:100%;
+  background:var(--ink-0);
+  color:var(--paper);
+  font-family:var(--font-body);
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+body{
+  font-variant-numeric:tabular-nums;
+  overscroll-behavior-y:none;
+}
+::selection{background:var(--forest); color:var(--paper);}
+button{font-family:inherit; -webkit-user-select:none; user-select:none;}
+input,select,textarea{font-family:inherit;}
+
+/* ---------- background texture ---------- */
+.bg-grain{
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    radial-gradient(circle at 15% 8%, rgba(61,107,74,0.16), transparent 45%),
+    radial-gradient(circle at 88% 82%, rgba(163,184,153,0.08), transparent 50%);
+}
+.bg-scanlines{
+  position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.035;
+  background-image:repeating-linear-gradient(180deg, #fff 0px, #fff 1px, transparent 1px, transparent 3px);
+}
+
+/* ---------- app shell ---------- */
+#app{
+  position:relative; z-index:1;
+  min-height:100vh;
+  min-height:100dvh;
+  display:flex; flex-direction:column;
+  max-width:560px; margin:0 auto;
+}
+
+/* ---------- header ---------- */
+.topbar{
+  padding: calc(18px + var(--safe-top)) 20px 14px;
+  display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:20;
+  background:linear-gradient(180deg, var(--ink-0) 60%, rgba(11,15,13,0.85) 85%, transparent);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+}
+.brand{display:flex; align-items:center; gap:10px;}
+.brand-mark{
+  width:34px; height:34px; border-radius:9px;
+  background:linear-gradient(155deg, var(--forest-bright), var(--forest) 60%, #24422f);
+  display:flex; align-items:center; justify-content:center;
+  position:relative; overflow:hidden;
+  box-shadow: 0 3px 10px rgba(61,107,74,0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.brand-mark::after{
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.35) 48%, transparent 62%);
+  transform:translateX(-140%);
+  animation: brandSweep 4.5s ease-in-out infinite;
+}
+@keyframes brandSweep{
+  0%,55%{transform:translateX(-140%);}
+  75%{transform:translateX(140%);}
+  100%{transform:translateX(140%);}
+}
+.brand-mark svg{width:18px; height:18px; position:relative; z-index:1;}
+.brand-text{display:flex; flex-direction:column; line-height:1.05;}
+.brand-text b{font-family:var(--font-display); font-size:17px; font-weight:700; letter-spacing:-0.01em;}
+.brand-text span{font-size:10.5px; color:var(--paper-faint); font-weight:500; letter-spacing:0.02em;}
+
+.acct-chip{
+  display:flex; align-items:center; gap:7px;
+  padding:6px 12px 6px 6px; border-radius:var(--radius-full);
+  background:var(--ink-2); border:1px solid var(--line);
+  font-size:12.5px; font-weight:600; color:var(--paper-dim);
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.acct-chip:active{transform:scale(0.96);}
+.acct-chip img{width:22px; height:22px; border-radius:50%;}
+.acct-dot{width:7px; height:7px; border-radius:50%; background:var(--sage); box-shadow:0 0 0 3px rgba(163,184,153,0.15);}
+
+/* ---------- scroll area ---------- */
+.scroll{
+  flex:1; overflow-y:auto; padding:4px 20px calc(96px + var(--safe-bottom));
+  -webkit-overflow-scrolling:touch;
+}
+
+/* ---------- gate (sign in) ---------- */
+.gate{
+  min-height:calc(100vh - 80px);
+  min-height:calc(100dvh - 80px);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; gap:22px; padding:20px 12px;
+}
+.gate-emblem{
+  width:88px; height:88px; border-radius:24px;
+  background:linear-gradient(155deg, var(--forest-bright), var(--forest) 55%, #1E3626);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 12px 32px rgba(61,107,74,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+  position:relative; overflow:hidden;
+  animation: emblemFloat 5s var(--ease-out) infinite;
+}
+@keyframes emblemFloat{
+  0%,100%{transform:translateY(0px);}
+  50%{transform:translateY(-6px);}
+}
+.gate-emblem svg{width:42px; height:42px;}
+.gate h1{font-family:var(--font-display); font-size:26px; margin:0; letter-spacing:-0.02em;}
+.gate p{color:var(--paper-faint); font-size:14.5px; line-height:1.55; max-width:320px; margin:0;}
+.btn-google{
+  display:flex; align-items:center; gap:10px;
+  background:var(--paper); color:var(--ink-0);
+  border:none; border-radius:var(--radius-full);
+  padding:14px 26px; font-size:15px; font-weight:700;
+  cursor:pointer; box-shadow:0 8px 24px rgba(245,243,238,0.12);
+  transition:transform var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast);
+}
+.btn-google:active{transform:scale(0.96);}
+.btn-google svg{width:19px; height:19px;}
+.gate-foot{font-size:11.5px; color:var(--paper-faint); opacity:0.7; max-width:280px;}
+
+/* ---------- summary card ---------- */
+.summary{
+  margin-top:14px;
+  background:linear-gradient(165deg, var(--ink-2), var(--ink-1));
+  border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:20px; position:relative; overflow:hidden;
+}
+.summary::before{
+  content:''; position:absolute; top:-40%; right:-25%; width:220px; height:220px; border-radius:50%;
+  background:radial-gradient(circle, rgba(163,184,153,0.14), transparent 70%);
+  pointer-events:none;
+}
+.summary-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+.summary-label{font-size:11.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--paper-faint); font-weight:700;}
+.month-pill{
+  font-size:11.5px; font-weight:700; color:var(--sage);
+  background:rgba(163,184,153,0.12); border:1px solid rgba(163,184,153,0.25);
+  padding:5px 11px; border-radius:var(--radius-full);
+}
+.saldo-row{display:flex; align-items:baseline; gap:8px;}
+.saldo-num{font-family:var(--font-display); font-size:44px; font-weight:700; letter-spacing:-0.02em; transition:color var(--dur-med) var(--ease-out);}
+.saldo-num.neg{color:var(--rust-bright);}
+.saldo-unit{font-size:13px; color:var(--paper-faint); font-weight:600;}
+.summary-stats{display:flex; gap:10px; margin-top:16px;}
+.stat-mini{flex:1; background:rgba(0,0,0,0.18); border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:10px 12px;}
+.stat-mini b{display:block; font-family:var(--font-display); font-size:18px; font-weight:600;}
+.stat-mini span{font-size:10.5px; color:var(--paper-faint); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;}
+.stat-mini.credit b{color:var(--sage);}
+.stat-mini.debit b{color:var(--rust-bright);}
+
+/* ---------- tabs ---------- */
+.tabs{
+  display:flex; gap:6px; margin:18px 0 14px;
+  background:var(--ink-2); border:1px solid var(--line); border-radius:var(--radius-full);
+  padding:4px;
+}
+.tab{
+  flex:1; text-align:center; padding:10px 8px; border:none; background:transparent;
+  color:var(--paper-faint); font-weight:700; font-size:13px; border-radius:var(--radius-full);
+  cursor:pointer; position:relative; z-index:1;
+  transition:color var(--dur-med) var(--ease-out);
+}
+.tab.active{color:var(--ink-0);}
+.tab-indicator{
+  position:absolute; top:4px; bottom:4px; left:4px;
+  width:calc(50% - 6px); border-radius:var(--radius-full);
+  background:var(--sage);
+  transition:transform var(--dur-med) var(--ease-spring);
+  box-shadow:0 2px 10px rgba(163,184,153,0.35);
+}
+.tab-indicator.pos-1{transform:translateX(calc(100% + 4px));}
+
+/* ---------- panels ---------- */
+.panel{display:none; animation:panelIn var(--dur-med) var(--ease-out);}
+.panel.active{display:block;}
+@keyframes panelIn{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
+
+.card{
+  background:var(--ink-2); border:1px solid var(--line); border-radius:var(--radius-lg);
+  padding:18px; margin-bottom:14px;
+}
+.card-title{display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-size:15.5px; font-weight:700; margin:0 0 4px;}
+.card-title svg{width:17px; height:17px; color:var(--sage); flex-shrink:0;}
+.card-desc{font-size:12.5px; color:var(--paper-faint); line-height:1.5; margin:0 0 16px;}
+
+/* ---------- dropzone / swipe strip ---------- */
+.dropzone{
+  border:1.5px dashed var(--line); border-radius:var(--radius-md);
+  padding:26px 16px; text-align:center; cursor:pointer;
+  transition:border-color var(--dur-fast), background var(--dur-fast);
+  position:relative; overflow:hidden;
+}
+.dropzone:active{transform:scale(0.99);}
+.dropzone.drag{border-color:var(--sage); background:rgba(163,184,153,0.06);}
+.dropzone.has-file{border-style:solid; border-color:var(--forest-bright);}
+.dz-icon{
+  width:46px; height:46px; margin:0 auto 12px; border-radius:14px;
+  background:var(--ink-3); display:flex; align-items:center; justify-content:center;
+}
+.dz-icon svg{width:22px; height:22px; color:var(--sage);}
+.dz-title{font-weight:700; font-size:14px; margin-bottom:4px;}
+.dz-sub{font-size:12px; color:var(--paper-faint);}
+.dz-filename{font-size:12.5px; color:var(--sage); font-weight:600; margin-top:8px; word-break:break-all;}
+input[type=file]{display:none;}
+
+/* swipe strip signature element */
+.swipe-strip{
+  position:relative; height:5px; border-radius:var(--radius-full);
+  background:var(--ink-3); overflow:hidden; margin-top:14px;
+}
+.swipe-strip .fill{
+  position:absolute; inset:0; width:0%;
+  background:linear-gradient(90deg, var(--forest), var(--sage));
+  border-radius:var(--radius-full);
+  transition:width var(--dur-med) var(--ease-out);
+}
+.swipe-strip .glint{
+  position:absolute; top:0; bottom:0; width:40px;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent);
+  transform:translateX(-100%);
+}
+.swipe-strip.scanning .glint{animation: glintMove 1.1s linear infinite;}
+@keyframes glintMove{ to{ transform:translateX(260px); } }
+
+/* ---------- preview list ---------- */
+.preview-list{margin-top:14px; display:flex; flex-direction:column; gap:8px; max-height:340px; overflow-y:auto; padding-right:2px;}
+.day-row{
+  display:flex; align-items:center; gap:12px;
+  background:var(--ink-3); border:1px solid var(--line-soft); border-radius:var(--radius-sm);
+  padding:11px 13px; opacity:0; transform:translateY(6px);
+  animation: rowIn var(--dur-med) var(--ease-out) forwards;
+}
+@keyframes rowIn{to{opacity:1; transform:translateY(0);}}
+.day-date{display:flex; flex-direction:column; min-width:52px;}
+.day-date b{font-family:var(--font-display); font-size:16px; font-weight:700; line-height:1.1;}
+.day-date span{font-size:10px; color:var(--paper-faint); text-transform:uppercase; font-weight:700;}
+.day-info{flex:1; min-width:0;}
+.day-info .faktur-range{font-size:12px; font-weight:600; color:var(--paper-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.day-info .unit-count{font-size:11px; color:var(--paper-faint); margin-top:2px;}
+.day-debit{
+  font-family:var(--font-display); font-weight:700; font-size:15px; color:var(--rust-bright);
+  white-space:nowrap;
+}
+.day-debit small{font-size:10px; color:var(--paper-faint); font-weight:500; display:block; text-align:right;}
+
+/* ---------- form (manual credit) ---------- */
+.field{margin-bottom:14px;}
+.field label{display:block; font-size:12px; font-weight:700; color:var(--paper-dim); margin-bottom:7px; text-transform:uppercase; letter-spacing:0.03em;}
+.field input, .field select{
+  width:100%; background:var(--ink-3); border:1px solid var(--line);
+  border-radius:var(--radius-sm); padding:13px 14px; color:var(--paper);
+  font-size:15px; font-weight:600; outline:none;
+  transition:border-color var(--dur-fast), background var(--dur-fast);
+  appearance:none; -webkit-appearance:none;
+}
+.field input:focus, .field select:focus{border-color:var(--sage); background:var(--ink-2);}
+.field input::placeholder{color:var(--paper-faint); font-weight:500;}
+.field-row{display:flex; gap:10px;}
+.field-row .field{flex:1;}
+.select-wrap{position:relative;}
+.select-wrap::after{
+  content:''; position:absolute; right:14px; top:50%; width:9px; height:9px;
+  border-right:2px solid var(--paper-faint); border-bottom:2px solid var(--paper-faint);
+  transform:translateY(-65%) rotate(45deg); pointer-events:none;
+}
+.chip-select{display:flex; gap:8px; flex-wrap:wrap;}
+.chip-opt{
+  padding:9px 15px; border-radius:var(--radius-full); border:1px solid var(--line);
+  background:var(--ink-3); color:var(--paper-dim); font-size:12.5px; font-weight:700; cursor:pointer;
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.chip-opt.active{background:var(--sage); border-color:var(--sage); color:var(--ink-0);}
+.chip-opt:active{transform:scale(0.94);}
+
+/* ---------- buttons ---------- */
+.btn-primary{
+  width:100%; padding:16px; border:none; border-radius:var(--radius-md);
+  background:linear-gradient(155deg, var(--forest-bright), var(--forest));
+  color:var(--paper); font-size:15px; font-weight:700; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:9px;
+  box-shadow:0 8px 22px rgba(61,107,74,0.32), inset 0 1px 0 rgba(255,255,255,0.15);
+  transition:transform var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast), opacity var(--dur-fast);
+  position:relative; overflow:hidden;
+}
+.btn-primary:active:not(:disabled){transform:scale(0.97);}
+.btn-primary:disabled{opacity:0.4; cursor:not-allowed; box-shadow:none;}
+.btn-primary svg{width:17px; height:17px;}
+.btn-secondary{
+  width:100%; padding:14px; border-radius:var(--radius-md);
+  background:transparent; border:1px solid var(--line);
+  color:var(--paper-dim); font-size:14px; font-weight:700; cursor:pointer;
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.btn-secondary:active{transform:scale(0.97); background:var(--ink-3);}
+
+.spinner{
+  width:16px; height:16px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.3); border-top-color:#fff;
+  animation:spin 0.7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ---------- bottom nav ---------- */
+.bottomnav{
+  position:fixed; left:0; right:0; bottom:0; z-index:30;
+  max-width:560px; margin:0 auto;
+  padding: 10px 20px calc(14px + var(--safe-bottom));
+  background:linear-gradient(0deg, var(--ink-0) 55%, rgba(11,15,13,0.9) 85%, transparent);
+  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+  display:flex; gap:10px;
+}
+.nav-btn{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;
+  padding:9px 4px; border-radius:14px; border:none; background:transparent;
+  color:var(--paper-faint); cursor:pointer; transition:all var(--dur-fast) var(--ease-out);
+}
+.nav-btn.active{color:var(--sage); background:rgba(163,184,153,0.09);}
+.nav-btn svg{width:20px; height:20px;}
+.nav-btn span{font-size:10.5px; font-weight:700;}
+
+/* ---------- toast ---------- */
+.toast-stack{position:fixed; top:calc(14px + var(--safe-top)); left:0; right:0; z-index:100; display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; padding:0 20px;}
+.toast{
+  pointer-events:auto;
+  max-width:400px; width:100%;
+  display:flex; align-items:center; gap:10px;
+  background:var(--ink-2); border:1px solid var(--line); border-radius:14px;
+  padding:13px 16px; box-shadow:0 12px 30px rgba(0,0,0,0.4);
+  animation: toastIn var(--dur-med) var(--ease-spring);
+  font-size:13px; font-weight:600;
+}
+.toast.success{border-color:rgba(163,184,153,0.4);}
+.toast.error{border-color:rgba(196,99,74,0.4);}
+.toast svg{width:18px; height:18px; flex-shrink:0;}
+.toast.success svg{color:var(--sage);}
+.toast.error svg{color:var(--rust-bright);}
+.toast.leaving{animation: toastOut var(--dur-fast) var(--ease-out) forwards;}
+@keyframes toastIn{from{opacity:0; transform:translateY(-14px) scale(0.95);} to{opacity:1; transform:translateY(0) scale(1);}}
+@keyframes toastOut{to{opacity:0; transform:translateY(-10px) scale(0.95);}}
+
+/* ---------- modal (sheet picker / confirm) ---------- */
+.modal-backdrop{
+  position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.55);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  display:flex; align-items:flex-end; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity var(--dur-med) var(--ease-out);
+}
+.modal-backdrop.show{opacity:1; pointer-events:auto;}
+.modal-sheet{
+  width:100%; max-width:560px; background:var(--ink-1); border:1px solid var(--line);
+  border-radius:24px 24px 0 0; padding:10px 20px calc(24px + var(--safe-bottom));
+  transform:translateY(100%); transition:transform var(--dur-slow) var(--ease-spring);
+  max-height:80vh; overflow-y:auto;
+}
+.modal-backdrop.show .modal-sheet{transform:translateY(0);}
+.modal-handle{width:38px; height:4px; border-radius:2px; background:var(--line); margin:8px auto 16px;}
+.modal-title{font-family:var(--font-display); font-size:18px; font-weight:700; margin:0 0 6px;}
+.modal-sub{font-size:12.5px; color:var(--paper-faint); margin:0 0 18px; line-height:1.5;}
+
+.confirm-table{background:var(--ink-3); border-radius:var(--radius-md); overflow:hidden; margin-bottom:18px;}
+.confirm-row{display:flex; justify-content:space-between; padding:12px 15px; border-bottom:1px solid var(--line-soft); font-size:13px;}
+.confirm-row:last-child{border-bottom:none;}
+.confirm-row span:first-child{color:var(--paper-faint); font-weight:600;}
+.confirm-row span:last-child{font-weight:700; font-family:var(--font-display);}
+
+/* ---------- empty state ---------- */
+.empty{text-align:center; padding:36px 16px; color:var(--paper-faint);}
+.empty svg{width:38px; height:38px; margin-bottom:10px; opacity:0.5;}
+.empty p{font-size:13px; margin:0; line-height:1.5;}
+
+/* ---------- utility ---------- */
+.hidden{display:none !important;}
+.row-between{display:flex; align-items:center; justify-content:space-between;}
+.mt-14{margin-top:14px;}
+.fade-in{animation:fadeIn var(--dur-med) var(--ease-out);}
+@keyframes fadeIn{from{opacity:0;} to{opacity:1;}}
+
+/* scrollbar */
+.scroll::-webkit-scrollbar, .preview-list::-webkit-scrollbar, .modal-sheet::-webkit-scrollbar{width:4px;}
+.scroll::-webkit-scrollbar-thumb, .preview-list::-webkit-scrollbar-thumb, .modal-sheet::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;}
+}
+
+@media (min-width:560px){
+  .topbar, .bottomnav{border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);}
+}
+</style>
+</head>
+<body>
+
+<div class="bg-grain"></div>
+<div class="bg-scanlines"></div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+
+  <!-- ============ TOPBAR ============ -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2-7 4 14 2-7h6" stroke="#F5F3EE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="brand-text">
+        <b>Inges</b>
+        <span>Input Gesek</span>
+      </div>
+    </div>
+    <div id="acctArea"></div>
+  </div>
+
+  <div class="scroll">
+
+    <!-- ============ GATE (sign in) ============ -->
+    <div class="gate" id="gate">
+      <div class="gate-emblem">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l2-7 4 14 2-7h6" stroke="#F5F3EE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h1>Input Gesek</h1>
+      <p>Rekap cek fisik dari listing penjualan langsung ke Google Sheets. Masuk dengan akun Google untuk mulai.</p>
+      <button class="btn-google" id="btnSignIn">
+        <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.6 5.6 0 0 1-2.4 3.63v3.02h3.86c2.26-2.09 3.57-5.17 3.57-8.89z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.84l-3.86-3.02c-1.07.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.28v3.11A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.27 14.33A7.2 7.2 0 0 1 4.89 12c0-.81.14-1.6.38-2.33V6.56H1.28A12 12 0 0 0 0 12c0 1.94.46 3.77 1.28 5.44l3.99-3.11z"/><path fill="#EA4335" d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.28 6.56l3.99 3.11C6.22 6.82 8.87 4.77 12 4.77z"/></svg>
+        Masuk dengan Google
+      </button>
+      <div class="gate-foot">Data yang diakses terbatas pada satu spreadsheet rekap cek fisik PT CDN.</div>
+    </div>
+
+    <!-- ============ MAIN CONTENT (after sign in) ============ -->
+    <div id="mainContent" class="hidden">
+
+      <!-- summary card -->
+      <div class="summary fade-in">
+        <div class="summary-top">
+          <span class="summary-label">Saldo Cek Fisik</span>
+          <span class="month-pill" id="monthPill">—</span>
+        </div>
+        <div class="saldo-row">
+          <span class="saldo-num" id="saldoNum">—</span>
+          <span class="saldo-unit">pcs</span>
+        </div>
+        <div class="summary-stats">
+          <div class="stat-mini credit">
+            <b id="statCredit">0</b>
+            <span>Credit bulan ini</span>
+          </div>
+          <div class="stat-mini debit">
+            <b id="statDebit">0</b>
+            <span>Debit bulan ini</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- tabs -->
+      <div class="tabs">
+        <button class="tab active" id="tabImport" data-tab="import">Import Otomatis</button>
+        <button class="tab" id="tabManual" data-tab="manual">Input Manual</button>
+        <div class="tab-indicator" id="tabIndicator"></div>
+      </div>
+
+      <!-- ===== PANEL: IMPORT ===== -->
+      <div class="panel active" id="panelImport">
+        <div class="card">
+          <h3 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Unggah Listing Penjualan
+          </h3>
+          <p class="card-desc">Pilih file CSV export dari program penjualan. Inges akan mengelompokkan otomatis per tanggal &mdash; setiap faktur terpakai 2 pcs cek fisik.</p>
+
+          <div class="dropzone" id="dropzone">
+            <div class="dz-icon">
+              <svg viewBox="0 0 24 24" fill="none" id="dzIconSvg"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 2v6h6" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="dz-title" id="dzTitle">Ketuk untuk pilih file CSV</div>
+            <div class="dz-sub" id="dzSub">atau tarik &amp; lepas di sini</div>
+            <div class="dz-filename hidden" id="dzFilename"></div>
+            <input type="file" id="fileInput" accept=".csv,text/csv">
+          </div>
+
+          <div class="swipe-strip hidden" id="swipeStrip">
+            <div class="fill" id="swipeFill"></div>
+            <div class="glint"></div>
+          </div>
+        </div>
+
+        <div class="card hidden" id="previewCard">
+          <div class="row-between" style="margin-bottom:2px;">
+            <h3 class="card-title" style="margin-bottom:0;">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Pratinjau Rekap
+            </h3>
+            <span class="dz-sub" id="previewCount"></span>
+          </div>
+          <div class="preview-list" id="previewList"></div>
+        </div>
+
+        <button class="btn-primary hidden" id="btnUpload" disabled>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 20V10m0 0l-5 5m5-5l5 5M5 4h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Tulis ke Google Sheets</span>
+        </button>
+      </div>
+
+      <!-- ===== PANEL: MANUAL ===== -->
+      <div class="panel" id="panelManual">
+        <div class="card">
+          <h3 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Tambah Stok (Credit)
+          </h3>
+          <p class="card-desc">Untuk penambahan cek fisik baru dari SP-DRI, SP-CF, atau sumber lain di luar penjualan.</p>
+
+          <div class="field">
+            <label>Tanggal</label>
+            <input type="date" id="manualDate">
+          </div>
+
+          <div class="field">
+            <label>Jenis Sumber</label>
+            <div class="chip-select" id="sourceChips">
+              <div class="chip-opt active" data-src="SP-DRI">SP-DRI</div>
+              <div class="chip-opt" data-src="SP-CF">SP-CF</div>
+              <div class="chip-opt" data-src="CUSTOM">Lainnya</div>
+            </div>
+          </div>
+
+          <div class="field" id="manualFakturField">
+            <label>Nomor Faktur / Referensi</label>
+            <input type="text" id="manualFaktur" placeholder="Contoh: 0122/SP-DRI/V/25">
+          </div>
+
+          <div class="field">
+            <label>Jumlah Credit (pcs)</label>
+            <input type="number" id="manualCredit" placeholder="Contoh: 300" inputmode="numeric">
+          </div>
+
+          <button class="btn-primary" id="btnManualSubmit" disabled>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 20V10m0 0l-5 5m5-5l5 5M5 4h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Tulis ke Google Sheets</span>
+          </button>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Riwayat Terkirim Sesi Ini
+          </h3>
+          <div id="sessionHistory">
+            <div class="empty">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <p>Belum ada input manual pada sesi ini.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <div class="bottomnav hidden" id="bottomnav">
+    <button class="nav-btn active" data-nav="import">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Import</span>
+    </button>
+    <button class="nav-btn" data-nav="manual">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Manual</span>
+    </button>
+    <button class="nav-btn" data-nav="settings">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Pengaturan</span>
+    </button>
+  </div>
+
+</div>
+
+<!-- ============ MODAL: CONFIRM UPLOAD ============ -->
+<div class="modal-backdrop" id="confirmModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Konfirmasi Penulisan</h3>
+    <p class="modal-sub">Data berikut akan ditulis ke sheet <b id="confirmSheetName">—</b>. Periksa sekali lagi sebelum lanjut.</p>
+    <div class="confirm-table" id="confirmTable"></div>
+    <button class="btn-primary" id="btnConfirmWrite">
+      <span id="confirmBtnLabel">Tulis Sekarang</span>
+    </button>
+    <button class="btn-secondary" style="margin-top:10px;" id="btnConfirmCancel">Batal</button>
+  </div>
+</div>
+
+<!-- ============ MODAL: SPREADSHEET SETUP ============ -->
+<div class="modal-backdrop" id="setupModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Hubungkan Spreadsheet</h3>
+    <p class="modal-sub">Tempel ID spreadsheet Rekap Cek Fisik. ID ada di URL: docs.google.com/spreadsheets/d/<b>ID-nya-di-sini</b>/edit</p>
+    <div class="field">
+      <label>Spreadsheet ID</label>
+      <input type="text" id="setupSheetId" placeholder="1ScmxyYlMuJroAmsIidTuCH9sm1U0N1ZRCO5kHOGZRhE">
+    </div>
+    <button class="btn-primary" id="btnSetupSave">
+      <span>Simpan &amp; Lanjutkan</span>
+    </button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
