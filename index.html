@@ -5,7 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
 <title>Inges — Input Gesek</title>
 <meta name="description" content="Input otomatis rekap cek fisik dari data penjualan ke Google Sheets">
-<meta name="theme-color" content="#0B0F0D">
+<meta name="theme-color" content="#0B0F0D" id="metaThemeColor">
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem('inges_theme');
+    if(!t){ t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark'; }
+    document.documentElement.setAttribute('data-theme', t);
+    var mc = document.getElementById('metaThemeColor');
+    if (mc) mc.setAttribute('content', t === 'light' ? '#F4F2EC' : '#0B0F0D');
+  }catch(e){}
+})();
+</script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -36,6 +47,12 @@
   --rust:#C4634A;
   --rust-bright:#DD7A5F;
 
+  --glass-bg: rgba(23,29,23,0.6);
+  --glass-border: rgba(255,255,255,0.08);
+  --sheet-glass-bg: rgba(18,22,17,0.92);
+  --scrim: rgba(11,15,13,0.85);
+  color-scheme: dark;
+
   --font-display:'Space Grotesk', sans-serif;
   --font-body:'Inter', sans-serif;
 
@@ -54,6 +71,30 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+:root[data-theme="light"]{
+  --ink-0:#F4F2EC;
+  --ink-1:#FFFFFF;
+  --ink-2:#FCFBF7;
+  --ink-3:#ECE9E1;
+  --line:#DEDAD0;
+  --line-soft:#E8E4DA;
+  --paper:#181C15;
+  --paper-dim:#4B5346;
+  --paper-faint:#868F7E;
+  --sage:#5C7A54;
+  --forest:#3D6B4A;
+  --forest-bright:#4E8560;
+  --amber:#B4802E;
+  --rust:#C4634A;
+  --rust-bright:#B94F37;
+
+  --glass-bg: rgba(255,255,255,0.6);
+  --glass-border: rgba(20,24,17,0.07);
+  --sheet-glass-bg: rgba(255,255,255,0.92);
+  --scrim: rgba(244,242,236,0.88);
+  color-scheme: light;
+}
+
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{
   margin:0; padding:0; height:100%;
@@ -66,6 +107,7 @@ html,body{
 body{
   font-variant-numeric:tabular-nums;
   overscroll-behavior-y:none;
+  transition:background-color var(--dur-slow) var(--ease-out), color var(--dur-slow) var(--ease-out);
 }
 ::selection{background:var(--forest); color:var(--paper);}
 button{font-family:inherit; -webkit-user-select:none; user-select:none;}
@@ -97,9 +139,10 @@ input,select,textarea{font-family:inherit;}
   padding: calc(18px + var(--safe-top)) 20px 14px;
   display:flex; align-items:center; justify-content:space-between;
   position:sticky; top:0; z-index:20;
-  background:linear-gradient(180deg, var(--ink-0) 60%, rgba(11,15,13,0.85) 85%, transparent);
+  background:linear-gradient(180deg, var(--ink-0) 60%, var(--scrim) 85%, transparent);
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
+  transition:background-color var(--dur-med) var(--ease-out);
 }
 .brand{display:flex; align-items:center; gap:10px;}
 .brand-mark{
@@ -128,13 +171,33 @@ input,select,textarea{font-family:inherit;}
 .acct-chip{
   display:flex; align-items:center; gap:7px;
   padding:6px 12px 6px 6px; border-radius:var(--radius-full);
-  background:var(--ink-2); border:1px solid var(--line);
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
   font-size:12.5px; font-weight:600; color:var(--paper-dim);
   transition:all var(--dur-fast) var(--ease-out);
 }
 .acct-chip:active{transform:scale(0.96);}
 .acct-chip img{width:22px; height:22px; border-radius:50%;}
 .acct-dot{width:7px; height:7px; border-radius:50%; background:var(--sage); box-shadow:0 0 0 3px rgba(163,184,153,0.15);}
+
+.topbar-actions{display:flex; align-items:center; gap:8px;}
+.theme-toggle{
+  width:34px; height:34px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  color:var(--paper-dim); cursor:pointer; position:relative; overflow:hidden;
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out), transform var(--dur-fast) var(--ease-spring);
+}
+.theme-toggle:active{transform:scale(0.88);}
+.tt-icon{
+  position:absolute; width:17px; height:17px;
+  transition:opacity var(--dur-med) var(--ease-spring), transform var(--dur-med) var(--ease-spring);
+}
+.tt-sun{opacity:0; transform:rotate(-90deg) scale(0.4);}
+.tt-moon{opacity:1; transform:rotate(0deg) scale(1);}
+[data-theme="light"] .tt-sun{opacity:1; transform:rotate(0deg) scale(1);}
+[data-theme="light"] .tt-moon{opacity:0; transform:rotate(90deg) scale(0.4);}
 
 /* ---------- scroll area ---------- */
 .scroll{
@@ -182,6 +245,7 @@ input,select,textarea{font-family:inherit;}
   background:linear-gradient(165deg, var(--ink-2), var(--ink-1));
   border:1px solid var(--line); border-radius:var(--radius-lg);
   padding:20px; position:relative; overflow:hidden;
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
 }
 .summary::before{
   content:''; position:absolute; top:-40%; right:-25%; width:220px; height:220px; border-radius:50%;
@@ -200,7 +264,7 @@ input,select,textarea{font-family:inherit;}
 .saldo-num.neg{color:var(--rust-bright);}
 .saldo-unit{font-size:13px; color:var(--paper-faint); font-weight:600;}
 .summary-stats{display:flex; gap:10px; margin-top:16px;}
-.stat-mini{flex:1; background:rgba(0,0,0,0.18); border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:10px 12px;}
+.stat-mini{flex:1; background:rgba(0,0,0,0.18); border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:10px 12px; transition:border-color var(--dur-med) var(--ease-out);}
 .stat-mini b{display:block; font-family:var(--font-display); font-size:18px; font-weight:600;}
 .stat-mini span{font-size:10.5px; color:var(--paper-faint); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;}
 .stat-mini.credit b{color:var(--sage);}
@@ -212,6 +276,7 @@ input,select,textarea{font-family:inherit;}
   display:flex; gap:6px; margin:18px 0 14px;
   background:var(--ink-2); border:1px solid var(--line); border-radius:var(--radius-full);
   padding:4px;
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
 }
 .tab{
   flex:1; text-align:center; padding:10px 8px; border:none; background:transparent;
@@ -237,6 +302,7 @@ input,select,textarea{font-family:inherit;}
 .card{
   background:var(--ink-2); border:1px solid var(--line); border-radius:var(--radius-lg);
   padding:18px; margin-bottom:14px;
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
 }
 .card-title{display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-size:15.5px; font-weight:700; margin:0 0 4px;}
 .card-title svg{width:17px; height:17px; color:var(--sage); flex-shrink:0;}
@@ -359,23 +425,41 @@ input[type=file]{display:none;}
 }
 @keyframes spin{to{transform:rotate(360deg);}}
 
-/* ---------- bottom nav ---------- */
+/* ---------- bottom nav (floating glass) ---------- */
 .bottomnav{
   position:fixed; left:0; right:0; bottom:0; z-index:30;
   max-width:560px; margin:0 auto;
-  padding: 10px 20px calc(14px + var(--safe-bottom));
-  background:linear-gradient(0deg, var(--ink-0) 55%, rgba(11,15,13,0.9) 85%, transparent);
-  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
-  display:flex; gap:10px;
+  padding: 0 16px calc(14px + var(--safe-bottom));
+  pointer-events:none;
 }
+.bottomnav-glass{
+  position:relative; pointer-events:auto;
+  display:flex; gap:2px; padding:6px;
+  border-radius:22px;
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  backdrop-filter:blur(22px) saturate(1.6); -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
+}
+.bn-indicator{
+  position:absolute; top:6px; bottom:6px; left:6px;
+  width:calc(33.333% - 5.333px);
+  border-radius:16px;
+  background:var(--sage); opacity:0.16;
+  transition:transform var(--dur-med) var(--ease-spring);
+}
+.bn-indicator.pos-1{transform:translateX(calc(100% + 2px));}
+.bn-indicator.pos-2{transform:translateX(calc(200% + 4px));}
 .nav-btn{
-  flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;
-  padding:9px 4px; border-radius:14px; border:none; background:transparent;
-  color:var(--paper-faint); cursor:pointer; transition:all var(--dur-fast) var(--ease-out);
+  position:relative; z-index:1;
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:9px 4px; border-radius:16px; border:none; background:transparent;
+  color:var(--paper-faint); cursor:pointer; transition:color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-spring);
 }
-.nav-btn.active{color:var(--sage); background:rgba(163,184,153,0.09);}
+.nav-btn.active{color:var(--sage);}
+.nav-btn:active{transform:scale(0.92);}
 .nav-btn svg{width:20px; height:20px;}
-.nav-btn span{font-size:10.5px; font-weight:700;}
+.nav-btn span{font-size:10px; font-weight:700;}
 
 /* ---------- toast ---------- */
 .toast-stack{position:fixed; top:calc(14px + var(--safe-top)); left:0; right:0; z-index:100; display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; padding:0 20px;}
@@ -406,9 +490,12 @@ input[type=file]{display:none;}
 }
 .modal-backdrop.show{opacity:1; pointer-events:auto;}
 .modal-sheet{
-  width:100%; max-width:560px; background:var(--ink-1); border:1px solid var(--line);
+  width:100%; max-width:560px;
+  background:var(--sheet-glass-bg); border:1px solid var(--glass-border);
+  backdrop-filter:blur(28px) saturate(1.5); -webkit-backdrop-filter:blur(28px) saturate(1.5);
   border-radius:24px 24px 0 0; padding:10px 20px calc(24px + var(--safe-bottom));
-  transform:translateY(100%); transition:transform var(--dur-slow) var(--ease-spring);
+  transform:translateY(100%);
+  transition:transform var(--dur-slow) var(--ease-spring), background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
   max-height:min(85vh, calc(100dvh - var(--safe-top) - 24px));
   overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y;
 }
@@ -487,7 +574,13 @@ input[type=file]{display:none;}
         <span>Input Gesek</span>
       </div>
     </div>
-    <div id="acctArea"></div>
+    <div class="topbar-actions">
+      <button class="theme-toggle" id="themeToggle" aria-label="Ganti tema terang/gelap" aria-pressed="false">
+        <svg class="tt-icon tt-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg class="tt-icon tt-moon" viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8.5 8.5 0 1110.5 4a6.7 6.7 0 009.5 10.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+      <div id="acctArea"></div>
+    </div>
   </div>
 
   <div class="scroll">
@@ -638,18 +731,21 @@ input[type=file]{display:none;}
 
   <!-- ============ BOTTOM NAV ============ -->
   <div class="bottomnav hidden" id="bottomnav">
-    <button class="nav-btn active" data-nav="import">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Import</span>
-    </button>
-    <button class="nav-btn" data-nav="manual">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Manual</span>
-    </button>
-    <button class="nav-btn" data-nav="settings">
-      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      <span>Pengaturan</span>
-    </button>
+    <div class="bottomnav-glass">
+      <div class="bn-indicator pos-0" id="bnIndicator"></div>
+      <button class="nav-btn active" data-nav="home">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M3 11l9-8 9 8M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Beranda</span>
+      </button>
+      <button class="nav-btn" data-nav="riwayat">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Riwayat</span>
+      </button>
+      <button class="nav-btn" data-nav="akun">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Akun</span>
+      </button>
+    </div>
   </div>
 
 </div>
@@ -665,6 +761,21 @@ input[type=file]{display:none;}
       <span id="confirmBtnLabel">Tulis Sekarang</span>
     </button>
     <button class="btn-secondary" style="margin-top:10px;" id="btnConfirmCancel">Batal</button>
+  </div>
+</div>
+
+<!-- ============ MODAL: RIWAYAT ============ -->
+<div class="modal-backdrop" id="riwayatModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Riwayat Sesi Ini</h3>
+    <p class="modal-sub">Input yang berhasil ditulis ke Google Sheets pada sesi kamu saat ini.</p>
+    <div id="riwayatList">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <p>Belum ada input yang tercatat pada sesi ini.</p>
+      </div>
+    </div>
   </div>
 </div>
 

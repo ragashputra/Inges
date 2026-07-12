@@ -766,17 +766,28 @@ function logSession(type, desc) {
 }
 
 function renderSessionLog() {
-  const container = $('#sessionHistory');
-  if (!state.sessionLog.length) return;
-  container.innerHTML = state.sessionLog.map(item => `
-    <div class="day-row" style="margin-bottom:8px;">
-      <div class="day-date">
-        <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
-        <span>${item.type === 'import' ? 'IMPORT' : 'MANUAL'}</span>
+  const emptyHTML = `
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p>Belum ada input yang tercatat pada sesi ini.</p>
+    </div>`;
+
+  const listHTML = state.sessionLog.length
+    ? state.sessionLog.map(item => `
+      <div class="day-row" style="margin-bottom:8px;">
+        <div class="day-date">
+          <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
+          <span>${item.type === 'import' ? 'IMPORT' : 'MANUAL'}</span>
+        </div>
+        <div class="day-info"><div class="faktur-range">${item.desc}</div></div>
       </div>
-      <div class="day-info"><div class="faktur-range">${item.desc}</div></div>
-    </div>
-  `).join('');
+    `).join('')
+    : emptyHTML;
+
+  const sessionHistory = $('#sessionHistory');
+  if (sessionHistory) sessionHistory.innerHTML = listHTML;
+  const riwayatList = $('#riwayatList');
+  if (riwayatList) riwayatList.innerHTML = listHTML;
 }
 
 /* =========================================================================
@@ -793,6 +804,8 @@ function openModal(sel) {
 }
 function closeModal(sel) {
   $(sel).classList.remove('show');
+  const id = sel.replace('#', '');
+  if (id === 'riwayatModal' || id === 'acctModal') setNavActive('home');
 }
 
 /* =========================================================================
@@ -867,6 +880,8 @@ function setupModals() {
   $('#btnConfirmCancel').addEventListener('click', () => closeModal('#confirmModal'));
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') closeModal('#confirmModal'); });
 
+  $('#riwayatModal').addEventListener('click', (e) => { if (e.target.id === 'riwayatModal') closeModal('#riwayatModal'); });
+
   $('#btnSetupSave').addEventListener('click', async () => {
     const raw = $('#setupSheetId').value.trim();
     const id = extractSheetIdFromInput(raw);
@@ -891,28 +906,70 @@ function extractSheetIdFromInput(input) {
 }
 
 /* =========================================================================
-   TABS + BOTTOM NAV
+   TABS
    ========================================================================= */
-function setupTabs() {
-  const setTab = (tab) => {
-    state.activeTab = tab;
-    $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    $('#tabIndicator').classList.toggle('pos-1', tab === 'manual');
-    $('#panelImport').classList.toggle('active', tab === 'import');
-    $('#panelManual').classList.toggle('active', tab === 'manual');
-    $$('.nav-btn').forEach(n => n.classList.toggle('active', n.dataset.nav === tab));
-  };
+function setTab(tab) {
+  state.activeTab = tab;
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  $('#tabIndicator').classList.toggle('pos-1', tab === 'manual');
+  $('#panelImport').classList.toggle('active', tab === 'import');
+  $('#panelManual').classList.toggle('active', tab === 'manual');
+}
 
+function setupTabs() {
   $('#tabImport').addEventListener('click', () => setTab('import'));
   $('#tabManual').addEventListener('click', () => setTab('manual'));
+}
 
+/* =========================================================================
+   BOTTOM NAV — Beranda / Riwayat / Akun
+   ========================================================================= */
+const NAV_ORDER = ['home', 'riwayat', 'akun'];
+
+function setNavActive(navKey) {
+  const idx = NAV_ORDER.indexOf(navKey);
+  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.nav === navKey));
+  const indicator = $('#bnIndicator');
+  if (indicator) indicator.className = `bn-indicator pos-${idx < 0 ? 0 : idx}`;
+}
+
+function setupBottomNav() {
   $$('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const nav = btn.dataset.nav;
-      if (nav === 'settings') { openModal('#setupModal'); return; }
-      setTab(nav);
+      if (nav === 'home') {
+        setNavActive('home');
+        setTab('import');
+        $('.scroll').scrollTo({ top: 0, behavior: 'smooth' });
+      } else if (nav === 'riwayat') {
+        setNavActive('riwayat');
+        openModal('#riwayatModal');
+      } else if (nav === 'akun') {
+        setNavActive('akun');
+        openAcctModal();
+      }
     });
   });
+  setNavActive('home');
+}
+
+/* =========================================================================
+   THEME TOGGLE (terang/gelap)
+   ========================================================================= */
+function setupThemeToggle() {
+  const btn = $('#themeToggle');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const root = document.documentElement;
+    const current = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = current === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    btn.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
+    const mc = document.getElementById('metaThemeColor');
+    if (mc) mc.setAttribute('content', next === 'light' ? '#F4F2EC' : '#0B0F0D');
+    try { localStorage.setItem('inges_theme', next); } catch (e) { /* non-fatal */ }
+  });
+  btn.setAttribute('aria-pressed', document.documentElement.getAttribute('data-theme') === 'light' ? 'true' : 'false');
 }
 
 /* =========================================================================
@@ -939,10 +996,13 @@ function init() {
   setupAcctModal();
   setupModalDrag();
   setupTabs();
+  setupBottomNav();
+  setupThemeToggle();
 
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
 
   updateManualFakturPlaceholder();
+  renderSessionLog();
   initGoogleAuth();
 
   if ('serviceWorker' in navigator) {
