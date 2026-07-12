@@ -25,7 +25,10 @@ const state = {
   userEmail: null,
   userPicture: null,
   spreadsheetId: null,
+  spreadsheetLocale: null,
+  formulaSep: ';',           // pemisah argumen formula — dideteksi otomatis dari locale spreadsheet
   activeSheetName: null,
+  availableSheets: [],
   activeSheetHeaderRow: 6,   // baris header "Tanggal | Nomor Faktur..." (1-indexed)
   saldoAwal: 0,
   lastSaldoRow: null,        // row index terakhir berisi data (sebelum "Saldo Akhir")
@@ -169,7 +172,64 @@ function setupAcctModal() {
     openModal('#setupModal');
   });
 
+  $('#btnPickSheet').addEventListener('click', () => {
+    closeModal('#acctModal');
+    openSheetPicker();
+  });
+
   $('#btnLogout').addEventListener('click', doLogout);
+}
+
+/**
+ * Modal pilih sheet bulan — dipakai kalau user mau menulis ke bulan
+ * selain bulan berjalan (koreksi data lampau, dsb), bukan cuma andalkan
+ * auto-detect nama bulan aktif.
+ */
+async function openSheetPicker() {
+  openModal('#sheetPickerModal');
+  const listEl = $('#sheetPickerList');
+  listEl.innerHTML = `
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <p>Memuat daftar sheet…</p>
+    </div>`;
+
+  try {
+    if (!state.availableSheets.length) await findActiveSheet();
+    renderSheetPickerList();
+  } catch (err) {
+    listEl.innerHTML = `<div class="empty"><p>${err.message || 'Gagal memuat daftar sheet.'}</p></div>`;
+  }
+}
+
+function renderSheetPickerList() {
+  const listEl = $('#sheetPickerList');
+  if (!state.availableSheets.length) {
+    listEl.innerHTML = '<div class="empty"><p>Tidak ada sheet ditemukan.</p></div>';
+    return;
+  }
+  // tampilkan yang terbaru duluan — sheet bulan berjalan biasanya di akhir daftar
+  const ordered = state.availableSheets.slice().reverse();
+  listEl.innerHTML = ordered.map(name => {
+    const isActive = name === state.activeSheetName;
+    return `
+      <div class="sheet-picker-item ${isActive ? 'active' : ''}" data-sheet="${name}">
+        <b>${name}</b>
+        ${isActive
+          ? '<span class="badge-active">Aktif</span>'
+          : '<svg viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'}
+      </div>`;
+  }).join('');
+
+  $$('.sheet-picker-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const chosen = item.dataset.sheet;
+      closeModal('#sheetPickerModal');
+      if (chosen === state.activeSheetName) return;
+      toast(`Berpindah ke sheet ${chosen}…`, 'success', 1800);
+      await loadActiveSheetContext(chosen);
+    });
+  });
 }
 
 function doLogout() {
@@ -236,12 +296,41 @@ function currentMonthSheetName(date = new Date()) {
 }
 
 async function getSpreadsheetMeta() {
-  return sheetsFetch(`${state.spreadsheetId}?fields=sheets.properties`);
+  return sheetsFetch(`${state.spreadsheetId}?fields=properties.locale,sheets.properties`);
+}
+
+/**
+ * Google Sheets pakai koma (,) sebagai pemisah argumen formula untuk locale
+ * berbahasa Inggris, tapi titik-koma (;) untuk mayoritas locale non-Inggris
+ * termasuk Indonesia (id_ID). Salah pakai separator membuat SEMUA formula
+ * yang ditulis lewat API gagal parse dan tampil #ERROR! di seluruh baris.
+ * Fungsi ini mendeteksi locale asli spreadsheet sekali di awal sesi,
+ * supaya formula yang kita tulis selalu cocok — bukan menebak.
+ */
+function formulaSeparatorForLocale(locale) {
+  const commaLocales = new Set(['en_US', 'en_GB', 'en', 'en_CA', 'en_AU', 'en_IE', 'en_ZA']);
+  if (!locale) return ';'; // default aman: mayoritas dunia (termasuk id_ID) pakai titik-koma
+  return commaLocales.has(locale) ? ',' : ';';
+}
+
+/**
+ * Bangun formula Saldo persis mengikuti pola yang sudah dipakai di sheet
+ * ("=IF(ISBLANK(E7);"";F6+D7-E7)"), dengan separator yang sudah disesuaikan
+ * ke locale spreadsheet aktif (state.formulaSep) supaya tidak pernah #ERROR!.
+ */
+function buildSaldoFormula(rowNum, prevRowNum) {
+  const s = state.formulaSep;
+  return `=IF(ISBLANK(E${rowNum})${s}""${s}F${prevRowNum}+D${rowNum}-E${rowNum})`;
 }
 
 async function findActiveSheet() {
   const meta = await getSpreadsheetMeta();
   const sheetNames = meta.sheets.map(s => s.properties.title);
+
+  state.spreadsheetLocale = meta.properties?.locale || null;
+  state.formulaSep = formulaSeparatorForLocale(state.spreadsheetLocale);
+  state.availableSheets = sheetNames;
+
   const now = new Date();
   const preferred = currentMonthSheetName(now);
 
@@ -265,9 +354,15 @@ async function findActiveSheet() {
  * Baca struktur sheet aktif: cari baris header, baris "Saldo Akhir",
  * baris data terakhir, dan nilai saldo saat ini.
  */
-async function loadActiveSheetContext() {
+async function loadActiveSheetContext(overrideSheetName) {
   try {
-    state.activeSheetName = await findActiveSheet();
+    if (overrideSheetName) {
+      // pastikan locale & daftar sheet tetap ter-refresh walau memilih sheet manual
+      if (!state.availableSheets.length || !state.spreadsheetLocale) await findActiveSheet();
+      state.activeSheetName = overrideSheetName;
+    } else {
+      state.activeSheetName = await findActiveSheet();
+    }
     $('#monthPill').textContent = state.activeSheetName;
 
     const range = `'${state.activeSheetName}'!A1:F200`;
@@ -305,9 +400,18 @@ async function loadActiveSheetContext() {
     }
     state.lastSaldoRow = lastFilled + 1; // 1-indexed baris terakhir berisi data/saldo-awal
 
-    // hitung current saldo dari kolom F baris terakhir yg terisi, kalau kosong pakai saldoAwal
-    const lastRowVals = rows[lastFilled] || [];
-    const currentSaldo = lastRowVals[5] !== undefined && lastRowVals[5] !== '' ? parseFloat(lastRowVals[5]) : state.saldoAwal;
+    // hitung current saldo dari kolom F baris terakhir yg terisi.
+    // Kalau cell itu berisi error formula (#ERROR!, #REF!, dst — muncul sebagai
+    // string literal dari Sheets API), mundur ke baris valid terakhir supaya
+    // saldo yang ditampilkan tetap akurat, bukan NaN yang menyesatkan.
+    let currentSaldo = NaN;
+    for (let i = lastFilled; i >= headerRow + 1; i--) {
+      const v = (rows[i] || [])[5];
+      if (v === undefined || v === '') continue;
+      const n = parseFloat(v);
+      if (!isNaN(n)) { currentSaldo = n; break; }
+    }
+    if (isNaN(currentSaldo)) currentSaldo = state.saldoAwal;
 
     // hitung total credit/debit bulan ini (jumlahkan kolom D & E dari header+2 s/d lastFilled)
     let totalCredit = 0, totalDebit = 0;
@@ -319,6 +423,14 @@ async function loadActiveSheetContext() {
     }
 
     updateSummary(currentSaldo, totalCredit, totalDebit);
+
+    // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
+    // kemungkinan besar butuh diperbaiki manual di sheet (mis. locale formula lama).
+    const hasFormulaError = rows.slice(headerRow + 1, lastFilled + 1)
+      .some(r => typeof (r || [])[5] === 'string' && (r[5].includes('#ERROR') || r[5].includes('#REF') || r[5].includes('#N/A')));
+    if (hasFormulaError) {
+      toast('Ada baris Saldo berisi error formula di sheet ini — cek manual sebelum menulis data baru.', 'error', 5500);
+    }
   } catch (e) {
     console.error(e);
     toast(e.message || 'Gagal membaca spreadsheet.', 'error');
@@ -327,8 +439,13 @@ async function loadActiveSheetContext() {
 
 function updateSummary(saldo, credit, debit) {
   const num = $('#saldoNum');
-  num.textContent = formatNum(saldo);
-  num.classList.toggle('neg', saldo < 0);
+  if (isNaN(saldo)) {
+    num.textContent = '—';
+    num.classList.remove('neg');
+  } else {
+    num.textContent = formatNum(saldo);
+    num.classList.toggle('neg', saldo < 0);
+  }
   $('#statCredit').textContent = formatNum(credit);
   $('#statDebit').textContent = formatNum(debit);
 }
@@ -595,7 +712,7 @@ async function executeImportWrite() {
         day.fakturRange,                          // C: Nomor Faktur Penjualan
         '',                                        // D: Credit (kosong)
         day.debit,                                 // E: Debit
-        `=IF(ISBLANK(B${rowNum}),"",F${prevRowNum}+D${rowNum}-E${rowNum})`, // F: Saldo (formula, konsisten dgn pola existing)
+        buildSaldoFormula(rowNum, prevRowNum), // F: Saldo
       ];
     });
 
@@ -730,7 +847,7 @@ async function executeManualWrite(dateObj, faktur, credit) {
       faktur,
       credit,
       '',
-      `=IF(ISBLANK(B${rowNum}),"",F${prevRowNum}+D${rowNum}-E${rowNum})`,
+      buildSaldoFormula(rowNum, prevRowNum),
     ]];
     const range = `'${state.activeSheetName}'!B${rowNum}:F${rowNum}`;
 
@@ -896,6 +1013,10 @@ function setupModals() {
   });
   $('#setupModal').addEventListener('click', (e) => {
     if (e.target.id === 'setupModal' && state.spreadsheetId) closeModal('#setupModal');
+  });
+
+  $('#sheetPickerModal').addEventListener('click', (e) => {
+    if (e.target.id === 'sheetPickerModal') closeModal('#sheetPickerModal');
   });
 }
 
