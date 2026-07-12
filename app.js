@@ -5,7 +5,7 @@
 
 /* ---------------- CONFIG ---------------- */
 // TODO ganti dengan OAuth Client ID milikmu dari Google Cloud Console
-const GOOGLE_CLIENT_ID = 'PASTE_OAUTH_CLIENT_ID_DISINI.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '622950826437-nqrvo65q8csnjdvbmmd74jjng6uitbej.apps.googleusercontent.com';
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email';
 
 const STORAGE_KEYS = {
