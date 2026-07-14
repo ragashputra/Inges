@@ -797,7 +797,7 @@ input[type=file]{display:none;}
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Cek Fisik Masuk
           </h3>
-          <p class="card-desc">Pengisian cek fisik masuk berdasarkan SP (Surat Pengantar) yang diterima dari SO Duri atau Ibu Lynda (RRO).</p>
+          <p class="card-desc">Pengisian cek fisik masuk berdasarkan SP (Surat Pengantar) yang diterima dari Biro atau Ibu Lynda (RRO).</p>
 
           <div class="field">
             <label>Tanggal</label>
@@ -954,6 +954,28 @@ input[type=file]{display:none;}
         <p>Memuat daftar sheet…</p>
       </div>
     </div>
+    <button class="btn-secondary" style="margin-top:4px;" id="btnOpenCreateSheet" type="button">
+      <svg viewBox="0 0 24 24" fill="none" style="width:15px;height:15px;vertical-align:-2px;margin-right:6px;"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Buat Sheet Baru
+    </button>
+  </div>
+</div>
+
+<!-- ============ MODAL: BUAT SHEET BARU ============ -->
+<div class="modal-backdrop" id="createSheetModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Buat Sheet Bulan Baru</h3>
+    <p class="modal-sub">Sheet baru disalin otomatis dari struktur sheet <b id="createSheetBasedOn">—</b> — header, format, dan rumus ikut tersalin. Saldo awal langsung diisi dari saldo akhir sheet itu.</p>
+    <div class="field">
+      <label>Nama Sheet</label>
+      <input type="text" id="createSheetNameInput" placeholder="Contoh: JULI 2026">
+    </div>
+    <button class="btn-primary" id="btnCreateSheetConfirm">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14m-7-7h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="createSheetBtnLabel">Buat Sheet Sekarang</span>
+    </button>
+    <button class="btn-secondary" style="margin-top:10px;" id="btnCreateSheetCancel">Nanti Saja</button>
   </div>
 </div>
 

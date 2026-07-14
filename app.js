@@ -776,7 +776,7 @@ function setupImportSubTabs() {
   const subManual = $('#subImportManual');
   const desc = $('#importSubDesc');
 
-  const descCsv = 'Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal — setiap faktur terpakai 2 pcs cek fisik.';
+  const descCsv = 'Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal dan setiap 1 unit SMH terpakai 2 pcs cek fisik.';
   const descManual = 'Input langsung kalau ada penjualan hari ini dan belum sempat export CSV. Cukup isi tanggal, jumlah unit, dan nomor faktur awal — Inges menghitung sisanya.';
 
   chipCsv.addEventListener('click', () => {
