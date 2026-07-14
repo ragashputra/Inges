@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   sessionLog: 'inges_session_log',
   lockedSheet: 'inges_locked_sheet',       // nama sheet bulan yang dikunci manual oleh user
   lockedFakturSuffix: 'inges_locked_faktur_suffix', // kode faktur (mis. PGR/VII/2026) yang dikunci manual
+  hadSession: 'inges_had_session',         // penanda "pernah login sebelumnya" - dipakai buat auto-relogin diam-diam
 };
 
 const SESSION_LOG_MAX_ENTRIES = 200; // batas biar localStorage tidak membengkak tak terbatas
@@ -27,6 +28,7 @@ const BULAN_ID_LONG = ['JANUARI','FEBRUARI','MARET','APRIL','MEI','JUNI','JULI',
 const state = {
   accessToken: null,
   tokenClient: null,
+  userWantsSignIn: false,    // true kalau user sendiri yang klik tombol login (buat tahu kapan boleh tampilkan toast error)
   userEmail: null,
   userPicture: null,
   spreadsheetId: null,
@@ -48,6 +50,20 @@ const state = {
 /* ---------------- DOM SHORTCUTS ---------------- */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
+
+/**
+ * Format tanggal LOKAL (bukan UTC) jadi "YYYY-MM-DD" buat isian <input type=date>.
+ * date.toISOString() salah dipakai di sini karena dia geser ke UTC — untuk
+ * pengguna WIB/WITA/WIT, itu bisa bikin tanggal default "hari ini" jadi
+ * kemarin di jam-jam dini hari. Fungsi ini selalu mengikuti tanggal
+ * kalender lokal perangkat, sesuai jam saat itu.
+ */
+function todayLocalISO(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 /* =========================================================================
    TOAST
@@ -82,28 +98,79 @@ function initGoogleAuth() {
     callback: onTokenReceived,
     error_callback: (err) => {
       console.error('OAuth error', err);
-      toast('Gagal masuk. Coba lagi.', 'error');
+      // kalau ini percobaan restore sesi diam-diam (bukan klik manual user),
+      // jangan tampilkan error — cukup balik ke layar login biasa tanpa drama.
+      if (state.userWantsSignIn) {
+        toast('Gagal masuk. Coba lagi.', 'error');
+      }
+      showSignInGate();
     }
   });
 
-  // cek token tersimpan (belum expired)
+  // cek token tersimpan (belum expired) -> langsung lanjut, tidak perlu login ulang
   const savedToken = localStorage.getItem(STORAGE_KEYS.token);
   const savedExp = parseInt(localStorage.getItem(STORAGE_KEYS.tokenExp) || '0', 10);
+  const hadSession = localStorage.getItem(STORAGE_KEYS.hadSession) === '1';
+
   if (savedToken && Date.now() < savedExp) {
     state.accessToken = savedToken;
     afterSignIn();
+  } else if (hadSession) {
+    // token sudah kedaluwarsa tapi user pernah login sebelumnya (dan belum logout manual)
+    // -> coba sambung ulang otomatis di belakang layar, tanpa memaksa user klik login lagi.
+    state.userWantsSignIn = false;
+    showAuthRestoring();
+    state.tokenClient.requestAccessToken({ prompt: '' });
+  } else {
+    showSignInGate();
   }
+}
+
+/**
+ * Tampilkan layar gate dalam mode "menyambungkan sesi" (spinner, tanpa
+ * tombol login) selagi Inges mencoba me-refresh token secara diam-diam.
+ */
+function showAuthRestoring() {
+  const text = $('#gateText');
+  const spinner = $('#gateSpinner');
+  const btn = $('#btnSignIn');
+  const foot = $('#gateFoot');
+  if (text) text.textContent = 'Menyambungkan sesi kamu…';
+  if (spinner) spinner.classList.remove('hidden');
+  if (btn) btn.classList.add('hidden');
+  if (foot) foot.classList.add('hidden');
+  $('#gate').classList.remove('hidden');
+  $('#mainContent').classList.add('hidden');
+  $('#bottomnav').classList.add('hidden');
+}
+
+/**
+ * Kembalikan layar gate ke tampilan login normal (dipakai kalau restore
+ * sesi diam-diam gagal, atau memang belum pernah login sama sekali).
+ */
+function showSignInGate() {
+  const text = $('#gateText');
+  const spinner = $('#gateSpinner');
+  const btn = $('#btnSignIn');
+  const foot = $('#gateFoot');
+  if (text) text.textContent = 'Rekap cek fisik dari listing penjualan langsung ke Google Sheets. Masuk dengan akun Google untuk mulai.';
+  if (spinner) spinner.classList.add('hidden');
+  if (btn) btn.classList.remove('hidden');
+  if (foot) foot.classList.remove('hidden');
+  $('#gate').classList.remove('hidden');
 }
 
 function onTokenReceived(resp) {
   if (resp.error) {
     toast('Otorisasi ditolak.', 'error');
+    showSignInGate();
     return;
   }
   state.accessToken = resp.access_token;
   const expiresInMs = (resp.expires_in || 3500) * 1000;
   localStorage.setItem(STORAGE_KEYS.token, resp.access_token);
   localStorage.setItem(STORAGE_KEYS.tokenExp, String(Date.now() + expiresInMs - 60000));
+  localStorage.setItem(STORAGE_KEYS.hadSession, '1');
   afterSignIn();
 }
 
@@ -113,6 +180,7 @@ function requestSignIn() {
     initGoogleAuth();
     return;
   }
+  state.userWantsSignIn = true;
   state.tokenClient.requestAccessToken({ prompt: '' });
 }
 
@@ -302,6 +370,7 @@ function doLogout() {
   const finishLogout = () => {
     localStorage.removeItem(STORAGE_KEYS.token);
     localStorage.removeItem(STORAGE_KEYS.tokenExp);
+    localStorage.removeItem(STORAGE_KEYS.hadSession);
     state.accessToken = null;
     state.userEmail = null;
     state.userPicture = null;
@@ -310,7 +379,7 @@ function doLogout() {
     $('#acctArea').innerHTML = '';
     $('#mainContent').classList.add('hidden');
     $('#bottomnav').classList.add('hidden');
-    $('#gate').classList.remove('hidden');
+    showSignInGate();
     setNavActive('home');
     setActivePage('home');
     toast('Berhasil logout.', 'success');
@@ -338,10 +407,12 @@ async function sheetsFetch(path, options = {}) {
     },
   });
   if (res.status === 401) {
-    // token expired mid-session -> minta ulang
+    // token expired di tengah sesi -> coba refresh diam-diam dulu, jangan langsung
+    // lempar ke layar login supaya tidak terasa "berulang-ulang login"
     localStorage.removeItem(STORAGE_KEYS.token);
-    toast('Sesi berakhir, silakan masuk ulang.', 'error');
-    requestSignIn();
+    toast('Sesi diperbarui, mencoba lagi…', 'success', 2200);
+    state.userWantsSignIn = false;
+    state.tokenClient?.requestAccessToken({ prompt: '' });
     throw new Error('Unauthorized');
   }
   if (!res.ok) {
@@ -764,9 +835,10 @@ function buildFakturRange(sortedFakturs) {
  */
 function buildQuickFakturRange(startNum, unitCount, suffix) {
   const cleanSuffix = suffix.replace(/^\/+/, ''); // buang slash di depan kalau PIC ikut mengetiknya
-  if (unitCount <= 1) return `${startNum}/${cleanSuffix}`;
+  const pad4 = (n) => String(n).padStart(4, '0');
+  if (unitCount <= 1) return `${pad4(startNum)}/${cleanSuffix}`;
   const endNum = startNum + unitCount - 1;
-  return `${startNum}-${endNum}/${cleanSuffix}`;
+  return `${pad4(startNum)}-${pad4(endNum)}/${cleanSuffix}`;
 }
 
 function formatTanggalDisplay(dateObj) {
@@ -870,7 +942,7 @@ function setupQuickEntry() {
 
   // default: tanggal hari ini. Kode faktur pakai yang dikunci kalau ada,
   // kalau nggak ikut bulan-romawi & tahun berjalan seperti biasa.
-  dateEl.value = new Date().toISOString().slice(0, 10);
+  dateEl.value = todayLocalISO();
   suffixEl.value = suffixLocked ? savedSuffix : defaultSuffix();
   refreshLockUI();
 
@@ -888,16 +960,26 @@ function setupQuickEntry() {
     refreshLockUI();
   });
 
+  // No. Faktur Awal wajib angka doang, maksimal 4 digit — auto-bersihkan
+  // karakter non-angka & potong kelebihan panjang saat user mengetik.
+  fakturStartEl.addEventListener('input', () => {
+    const cleaned = fakturStartEl.value.replace(/\D/g, '').slice(0, 4);
+    if (cleaned !== fakturStartEl.value) fakturStartEl.value = cleaned;
+  });
+
   const revalidate = () => {
     const unitCount = parseInt(unitEl.value, 10);
-    const startNum = parseInt(fakturStartEl.value, 10);
+    const fakturStartRaw = fakturStartEl.value.trim();
+    const startNum = parseInt(fakturStartRaw, 10);
     const suffix = suffixEl.value.trim();
     const dateVal = dateEl.value;
 
     // selagi dikunci, ikutin terus perubahan yang diketik user
     if (suffixLocked) localStorage.setItem(STORAGE_KEYS.lockedFakturSuffix, suffix);
 
-    const valid = dateVal && unitCount > 0 && startNum > 0 && suffix.length > 0;
+    // no. faktur awal wajib persis 4 digit angka
+    const fakturStartValid = /^\d{4}$/.test(fakturStartRaw);
+    const valid = dateVal && unitCount > 0 && fakturStartValid && suffix.length > 0;
     btnAdd.disabled = !valid;
 
     if (valid) {
@@ -1323,8 +1405,7 @@ function setupManualForm() {
     });
   });
 
-  const today = new Date();
-  $('#manualDate').value = today.toISOString().slice(0, 10);
+  $('#manualDate').value = todayLocalISO();
 
   [$('#manualFaktur'), $('#manualCredit'), $('#manualDate')].forEach(el => {
     el.addEventListener('input', validateManualForm);
