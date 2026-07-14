@@ -505,16 +505,41 @@ async function readSheetStructure(sheetName) {
 }
 
 /**
+ * Ambil "Saldo Akhir" (kolom biru, baris paling bawah tiap sheet) dari sheet
+ * bulan sebelumnya langsung dari spreadsheet — bukan dari angka yang ditulis
+ * manual di baris saldo-awal (F7) sheet aktif. Sheet sebelumnya ditentukan dari
+ * urutan tab asli di spreadsheet (state.availableSheets), sesuai urutan
+ * kronologis yang sudah dipakai user.
+ */
+async function fetchPreviousMonthEndingSaldo(sheetName) {
+  const idx = state.availableSheets.indexOf(sheetName);
+  if (idx <= 0) return null; // sheet pertama / tidak ditemukan -> tidak ada bulan sebelumnya
+  const prevName = state.availableSheets[idx - 1];
+  try {
+    const prevStruct = await readSheetStructure(prevName);
+    return isNaN(prevStruct.currentSaldo) ? null : prevStruct.currentSaldo;
+  } catch (e) {
+    console.warn('Gagal membaca Saldo Akhir sheet sebelumnya:', prevName, e);
+    return null;
+  }
+}
+
+/**
  * Terapkan struktur sheet yang sudah dibaca ke state & UI (ringkasan saldo,
  * dropdown sheet, peringatan formula error).
  */
-function applySheetStructureToState(struct) {
+async function applySheetStructureToState(struct, sheetName) {
   state.activeSheetHeaderRow = struct.headerRow1;
-  state.saldoAwal = struct.saldoAwal;
   state.lastSaldoRow = struct.lastSaldoRow1;
   state.saldoAkhirRow = struct.saldoAkhirRow1;
 
-  updateSummary(struct.currentSaldo, struct.totalCredit, struct.totalDebit, struct.saldoAwal);
+  // "Saldo bulan lalu" = Saldo Akhir (kolom biru) sheet bulan sebelumnya,
+  // dibaca otomatis dari spreadsheet. Fallback ke F7 sheet aktif kalau sheet
+  // sebelumnya tidak ada / gagal dibaca.
+  const prevEndingSaldo = await fetchPreviousMonthEndingSaldo(sheetName);
+  state.saldoAwal = prevEndingSaldo !== null ? prevEndingSaldo : struct.saldoAwal;
+
+  updateSummary(struct.currentSaldo, struct.totalCredit, struct.totalDebit, state.saldoAwal);
   populateImportSheetSelect();
 
   // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
@@ -570,7 +595,7 @@ async function loadActiveSheetContext(overrideSheetName) {
     refreshSheetLockUI();
 
     const struct = await readSheetStructure(targetName);
-    applySheetStructureToState(struct);
+    await applySheetStructureToState(struct, targetName);
 
     if (sheetMissing && state.autoCreatePromptDismissedFor !== sheetMissing) {
       openCreateSheetModal(sheetMissing);
