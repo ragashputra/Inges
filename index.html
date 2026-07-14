@@ -255,10 +255,15 @@ input,select,textarea{font-family:inherit;}
 .summary-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
 .summary-label{font-size:11.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--paper-faint); font-weight:700;}
 .month-pill{
-  font-size:11.5px; font-weight:700; color:var(--sage);
+  display:flex; align-items:center; gap:5px; border:none; cursor:pointer;
+  font-size:11.5px; font-weight:700; color:var(--sage); font-family:inherit;
   background:rgba(163,184,153,0.12); border:1px solid rgba(163,184,153,0.25);
   padding:5px 11px; border-radius:var(--radius-full);
+  transition:all var(--dur-fast) var(--ease-out);
 }
+.month-pill:active{transform:scale(0.94);}
+.month-pill svg{width:11px; height:11px; flex-shrink:0;}
+.month-pill.locked{color:var(--amber); background:rgba(212,162,76,0.12); border-color:rgba(212,162,76,0.3);}
 .saldo-row{display:flex; align-items:baseline; gap:8px;}
 .saldo-num{font-family:var(--font-display); font-size:44px; font-weight:700; letter-spacing:-0.02em; transition:color var(--dur-med) var(--ease-out);}
 .saldo-num.neg{color:var(--rust-bright);}
@@ -294,9 +299,9 @@ input,select,textarea{font-family:inherit;}
 }
 .tab-indicator.pos-1{transform:translateX(calc(100% + 4px));}
 
-/* ---------- panels ---------- */
-.panel{display:none; animation:panelIn var(--dur-med) var(--ease-out);}
-.panel.active{display:block;}
+/* ---------- panels & pages ---------- */
+.panel,.page{display:none; animation:panelIn var(--dur-med) var(--ease-out);}
+.panel.active,.page.active{display:block;}
 @keyframes panelIn{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
 
 .card{
@@ -532,6 +537,22 @@ input[type=file]{display:none;}
 .acct-modal-info{display:flex; flex-direction:column; gap:4px; min-width:0;}
 .acct-modal-info b{font-size:15px; font-weight:700; font-family:var(--font-display); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .acct-modal-info span{font-size:11.5px; color:var(--paper-faint); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+.lock-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background:var(--ink-3); border:1px solid var(--line-soft); border-radius:var(--radius-sm);
+  padding:12px 14px; margin-bottom:16px;
+}
+.lock-row-text{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.lock-row-text b{font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.lock-row-text span{font-size:11px; color:var(--paper-faint); font-weight:600;}
+.lock-row-text span.locked{color:var(--amber);}
+.btn-unlock{
+  flex-shrink:0; padding:8px 13px; border-radius:var(--radius-full); border:1px solid var(--line);
+  background:transparent; color:var(--paper-dim); font-size:11.5px; font-weight:700; cursor:pointer;
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.btn-unlock:active{transform:scale(0.94); background:var(--ink-2);}
 .btn-danger{
   width:100%; padding:14px; border-radius:var(--radius-md);
   background:rgba(196,99,74,0.1); border:1px solid rgba(196,99,74,0.32);
@@ -638,11 +659,14 @@ input[type=file]{display:none;}
     <!-- ============ MAIN CONTENT (after sign in) ============ -->
     <div id="mainContent" class="hidden">
 
+     <!-- ===== PAGE: BERANDA ===== -->
+     <div class="page active" id="pageHome">
+
       <!-- summary card -->
       <div class="summary fade-in">
         <div class="summary-top">
           <span class="summary-label">Saldo Cek Fisik</span>
-          <span class="month-pill" id="monthPill">—</span>
+          <button class="month-pill" id="monthPill" type="button">—</button>
         </div>
         <div class="saldo-row">
           <span class="saldo-num" id="saldoNum">—</span>
@@ -804,20 +828,65 @@ input[type=file]{display:none;}
             <span>Tulis ke Google Sheets</span>
           </button>
         </div>
+      </div>
 
+     </div>
+     <!-- /pageHome -->
+
+     <!-- ===== PAGE: RIWAYAT ===== -->
+     <div class="page" id="pageRiwayat">
         <div class="card">
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             Riwayat Terkirim
           </h3>
-          <div id="sessionHistory">
+          <p class="card-desc">Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.</p>
+          <div id="riwayatList">
             <div class="empty">
               <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <p>Belum ada input yang tercatat.</p>
             </div>
           </div>
+          <button class="btn-danger" style="margin-top:14px;" id="btnClearHistory">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Hapus Riwayat
+          </button>
         </div>
-      </div>
+     </div>
+     <!-- /pageRiwayat -->
+
+     <!-- ===== PAGE: AKUN ===== -->
+     <div class="page" id="pageAkun">
+        <div class="card">
+          <div class="acct-modal-head">
+            <img id="acctPagePic" src="" alt="" class="hidden">
+            <div class="acct-modal-dot hidden" id="acctPageDot"></div>
+            <div class="acct-modal-info">
+              <b id="acctPageEmail">—</b>
+              <span id="acctPageSheetLabel">—</span>
+            </div>
+          </div>
+
+          <div class="lock-row">
+            <div class="lock-row-text">
+              <b id="acctPageSheet">—</b>
+              <span id="lockStatusText">Mengikuti bulan berjalan otomatis</span>
+            </div>
+            <button class="btn-unlock hidden" id="btnUnlockSheet" type="button">Ikuti Otomatis</button>
+          </div>
+
+          <button class="btn-secondary" id="btnChangeSheet">Ganti Spreadsheet</button>
+          <button class="btn-secondary" style="margin-top:10px;" id="btnPickSheet">
+            <svg viewBox="0 0 24 24" fill="none" style="width:15px;height:15px;vertical-align:-2px;margin-right:6px;"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Pilih Sheet Bulan
+          </button>
+          <button class="btn-danger" style="margin-top:10px;" id="btnLogout">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Logout</span>
+          </button>
+        </div>
+     </div>
+     <!-- /pageAkun -->
 
     </div>
   </div>
@@ -857,49 +926,6 @@ input[type=file]{display:none;}
   </div>
 </div>
 
-<!-- ============ MODAL: RIWAYAT ============ -->
-<div class="modal-backdrop" id="riwayatModal">
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <h3 class="modal-title">Riwayat</h3>
-    <p class="modal-sub">Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.</p>
-    <div id="riwayatList">
-      <div class="empty">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <p>Belum ada input yang tercatat.</p>
-      </div>
-    </div>
-    <button class="btn-danger" style="margin-top:14px;" id="btnClearHistory">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Hapus Riwayat
-    </button>
-  </div>
-</div>
-
-<!-- ============ MODAL: AKUN ============ -->
-<div class="modal-backdrop" id="acctModal">
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <div class="acct-modal-head">
-      <img id="acctModalPic" src="" alt="" class="hidden">
-      <div class="acct-modal-dot hidden" id="acctModalDot"></div>
-      <div class="acct-modal-info">
-        <b id="acctModalEmail">—</b>
-        <span id="acctModalSheet">—</span>
-      </div>
-    </div>
-    <button class="btn-secondary" id="btnChangeSheet">Ganti Spreadsheet</button>
-    <button class="btn-secondary" style="margin-top:10px;" id="btnPickSheet">
-      <svg viewBox="0 0 24 24" fill="none" style="width:15px;height:15px;vertical-align:-2px;margin-right:6px;"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      Pilih Sheet Bulan
-    </button>
-    <button class="btn-danger" style="margin-top:10px;" id="btnLogout">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Logout</span>
-    </button>
-  </div>
-</div>
-
 <!-- ============ MODAL: SPREADSHEET SETUP ============ -->
 <div class="modal-backdrop" id="setupModal">
   <div class="modal-sheet">
@@ -921,7 +947,7 @@ input[type=file]{display:none;}
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <h3 class="modal-title">Pilih Sheet Bulan</h3>
-    <p class="modal-sub">Inges otomatis pilih sheet bulan berjalan. Kalau mau tulis ke bulan lain, pilih di bawah ini.</p>
+    <p class="modal-sub">Sheet yang dipilih akan terkunci — Inges tetap memakainya walau di-reload atau ditutup, sampai kamu ganti lagi atau lepas kunci dari halaman Akun.</p>
     <div id="sheetPickerList" class="sheet-picker-list">
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>

@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   token: 'inges_gtoken',
   tokenExp: 'inges_gtoken_exp',
   sessionLog: 'inges_session_log',
+  lockedSheet: 'inges_locked_sheet', // nama sheet bulan yang dikunci manual oleh user
 };
 
 const SESSION_LOG_MAX_ENTRIES = 200; // batas biar localStorage tidak membengkak tak terbatas
@@ -31,6 +32,7 @@ const state = {
   spreadsheetLocale: null,
   formulaSep: ';',           // pemisah argumen formula — dideteksi otomatis dari locale spreadsheet
   activeSheetName: null,
+  lockedSheetName: null,     // kalau terisi, dipakai terus lintas reload/tutup PWA sampai diganti/dilepas
   availableSheets: [],
   activeSheetHeaderRow: 6,   // baris header "Tanggal | Nomor Faktur..." (1-indexed)
   saldoAwal: 0,
@@ -129,6 +131,8 @@ async function afterSignIn() {
     }
   } catch (e) { /* non-fatal */ }
 
+  state.lockedSheetName = localStorage.getItem(STORAGE_KEYS.lockedSheet) || null;
+
   const savedSheetId = localStorage.getItem(STORAGE_KEYS.sheetId);
   if (savedSheetId) {
     state.spreadsheetId = savedSheetId;
@@ -138,6 +142,24 @@ async function afterSignIn() {
   }
 }
 
+/**
+ * "Kunci" sheet aktif — dipakai setiap kali user memilih sheet secara manual
+ * (lewat modal pilih sheet atau dropdown di panel import), supaya Inges
+ * tetap memakai sheet itu walau di-reload / PWA ditutup dan dibuka lagi,
+ * alih-alih balik ke auto-detect bulan berjalan.
+ */
+function lockSheet(name) {
+  state.lockedSheetName = name;
+  localStorage.setItem(STORAGE_KEYS.lockedSheet, name);
+  refreshSheetLockUI();
+}
+
+function unlockSheet() {
+  state.lockedSheetName = null;
+  localStorage.removeItem(STORAGE_KEYS.lockedSheet);
+  refreshSheetLockUI();
+}
+
 function renderAcctChip() {
   const area = $('#acctArea');
   area.innerHTML = `
@@ -145,17 +167,25 @@ function renderAcctChip() {
       ${state.userPicture ? `<img src="${state.userPicture}" alt="">` : '<span class="acct-dot"></span>'}
       <span>${(state.userEmail || 'Akun').split('@')[0]}</span>
     </button>`;
-  $('#acctChipBtn').addEventListener('click', openAcctModal);
+  $('#acctChipBtn').addEventListener('click', goToAkunPage);
 }
 
-function openAcctModal() {
-  $('#acctModalEmail').textContent = state.userEmail || 'Akun Google';
-  $('#acctModalSheet').textContent = state.activeSheetName
+function goToAkunPage() {
+  setNavActive('akun');
+  setActivePage('akun');
+}
+
+/**
+ * Isi halaman Akun (bukan lagi modal) dengan data profil & status kunci sheet.
+ */
+function renderAkunPage() {
+  $('#acctPageEmail').textContent = state.userEmail || 'Akun Google';
+  $('#acctPageSheetLabel').textContent = state.activeSheetName
     ? `Terhubung ke sheet ${state.activeSheetName}`
     : 'Spreadsheet belum terhubung';
 
-  const pic = $('#acctModalPic');
-  const dot = $('#acctModalDot');
+  const pic = $('#acctPagePic');
+  const dot = $('#acctPageDot');
   if (state.userPicture) {
     pic.src = state.userPicture;
     pic.classList.remove('hidden');
@@ -164,20 +194,45 @@ function openAcctModal() {
     pic.classList.add('hidden');
     dot.classList.remove('hidden');
   }
-  openModal('#acctModal');
+  refreshSheetLockUI();
 }
 
-function setupAcctModal() {
-  $('#acctModal').addEventListener('click', (e) => { if (e.target.id === 'acctModal') closeModal('#acctModal'); });
+/**
+ * Sinkronkan semua indikator visual status kunci sheet: pill bulan di
+ * beranda dan kartu status di halaman Akun.
+ */
+function refreshSheetLockUI() {
+  const locked = !!state.lockedSheetName;
 
+  const pill = $('#monthPill');
+  if (pill) {
+    const lockIcon = '<svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    pill.innerHTML = `${locked ? lockIcon : ''}<span>${state.activeSheetName || '—'}</span>`;
+    pill.classList.toggle('locked', locked);
+  }
+
+  const sheetName = $('#acctPageSheet');
+  if (sheetName) sheetName.textContent = state.activeSheetName || 'Belum ada sheet aktif';
+  const statusText = $('#lockStatusText');
+  if (statusText) {
+    statusText.textContent = locked ? 'Terkunci — tidak ikut pindah otomatis' : 'Mengikuti bulan berjalan otomatis';
+    statusText.classList.toggle('locked', locked);
+  }
+  const btnUnlock = $('#btnUnlockSheet');
+  if (btnUnlock) btnUnlock.classList.toggle('hidden', !locked);
+}
+
+function setupAkunPage() {
   $('#btnChangeSheet').addEventListener('click', () => {
-    closeModal('#acctModal');
     openModal('#setupModal');
   });
 
-  $('#btnPickSheet').addEventListener('click', () => {
-    closeModal('#acctModal');
-    openSheetPicker();
+  $('#btnPickSheet').addEventListener('click', openSheetPicker);
+
+  $('#btnUnlockSheet').addEventListener('click', async () => {
+    unlockSheet();
+    toast('Sheet mengikuti bulan berjalan otomatis lagi.', 'success', 2400);
+    await loadActiveSheetContext();
   });
 
   $('#btnLogout').addEventListener('click', doLogout);
@@ -228,15 +283,18 @@ function renderSheetPickerList() {
     item.addEventListener('click', async () => {
       const chosen = item.dataset.sheet;
       closeModal('#sheetPickerModal');
-      if (chosen === state.activeSheetName) return;
-      toast(`Berpindah ke sheet ${chosen}…`, 'success', 1800);
+      lockSheet(chosen);
+      if (chosen === state.activeSheetName) {
+        toast(`Sheet ${chosen} dikunci.`, 'success', 1800);
+        return;
+      }
+      toast(`Berpindah & mengunci sheet ${chosen}…`, 'success', 1800);
       await loadActiveSheetContext(chosen);
     });
   });
 }
 
 function doLogout() {
-  closeModal('#acctModal');
   const token = state.accessToken;
 
   const finishLogout = () => {
@@ -251,6 +309,8 @@ function doLogout() {
     $('#mainContent').classList.add('hidden');
     $('#bottomnav').classList.add('hidden');
     $('#gate').classList.remove('hidden');
+    setNavActive('home');
+    setActivePage('home');
     toast('Berhasil logout.', 'success');
   };
 
@@ -326,17 +386,27 @@ function buildSaldoFormula(rowNum, prevRowNum) {
   return `=IF(ISBLANK(E${rowNum})${s}""${s}F${prevRowNum}+D${rowNum}-E${rowNum})`;
 }
 
-async function findActiveSheet() {
+/**
+ * Ambil daftar sheet & locale spreadsheet, simpan ke state. Dipisah dari
+ * deteksi "sheet mana yang dipakai" supaya bisa dipanggil ulang saat perlu
+ * cek validitas sheet yang terkunci tanpa langsung menimpa pilihan user.
+ */
+async function loadSpreadsheetMeta() {
   const meta = await getSpreadsheetMeta();
   const sheetNames = meta.sheets.map(s => s.properties.title);
-
   state.spreadsheetLocale = meta.properties?.locale || null;
   state.formulaSep = formulaSeparatorForLocale(state.spreadsheetLocale);
   state.availableSheets = sheetNames;
+  return sheetNames;
+}
 
+/**
+ * Tentukan nama sheet bulan berjalan dari daftar sheet yang tersedia
+ * (auto-detect murni, tidak peduli status kunci).
+ */
+function detectPreferredSheetName(sheetNames) {
   const now = new Date();
   const preferred = currentMonthSheetName(now);
-
   if (sheetNames.includes(preferred)) return preferred;
 
   // fallback: cocokkan berdasarkan bulan+tahun dengan variasi penulisan yang longgar
@@ -353,6 +423,11 @@ async function findActiveSheet() {
   return sheetNames[sheetNames.length - 1];
 }
 
+async function findActiveSheet() {
+  const sheetNames = await loadSpreadsheetMeta();
+  return detectPreferredSheetName(sheetNames);
+}
+
 /**
  * Baca struktur sheet aktif: cari baris header, baris "Saldo Akhir",
  * baris data terakhir, dan nilai saldo saat ini.
@@ -361,12 +436,22 @@ async function loadActiveSheetContext(overrideSheetName) {
   try {
     if (overrideSheetName) {
       // pastikan locale & daftar sheet tetap ter-refresh walau memilih sheet manual
-      if (!state.availableSheets.length || !state.spreadsheetLocale) await findActiveSheet();
+      if (!state.availableSheets.length || !state.spreadsheetLocale) await loadSpreadsheetMeta();
       state.activeSheetName = overrideSheetName;
     } else {
-      state.activeSheetName = await findActiveSheet();
+      const sheetNames = await loadSpreadsheetMeta();
+      if (state.lockedSheetName && sheetNames.includes(state.lockedSheetName)) {
+        // sheet yang dikunci user masih ada -> tetap pakai itu, jangan auto-pindah bulan
+        state.activeSheetName = state.lockedSheetName;
+      } else {
+        if (state.lockedSheetName) {
+          // sheet yang dikunci sudah tidak ada lagi (dihapus/diganti nama) -> lepas kunci basi
+          unlockSheet();
+        }
+        state.activeSheetName = detectPreferredSheetName(sheetNames);
+      }
     }
-    $('#monthPill').textContent = state.activeSheetName;
+    refreshSheetLockUI();
 
     const range = `'${state.activeSheetName}'!A1:F200`;
     const data = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}`);
@@ -471,7 +556,8 @@ function setupImportSheetSelect() {
     const hadPreview = state.parsedDays.length > 0;
     resetImportPanel();
 
-    toast(`Berpindah ke sheet ${chosen}…`, 'success', 1800);
+    lockSheet(chosen);
+    toast(`Berpindah & mengunci sheet ${chosen}…`, 'success', 1800);
     await loadActiveSheetContext(chosen);
 
     if (hadPreview) {
@@ -1140,8 +1226,6 @@ function renderSessionLog() {
     `).join('')
     : emptyHTML;
 
-  const sessionHistory = $('#sessionHistory');
-  if (sessionHistory) sessionHistory.innerHTML = listHTML;
   const riwayatList = $('#riwayatList');
   if (riwayatList) riwayatList.innerHTML = listHTML;
 }
@@ -1160,8 +1244,6 @@ function openModal(sel) {
 }
 function closeModal(sel) {
   $(sel).classList.remove('show');
-  const id = sel.replace('#', '');
-  if (id === 'riwayatModal' || id === 'acctModal') setNavActive('home');
 }
 
 /* =========================================================================
@@ -1235,8 +1317,6 @@ function setupModalDrag() {
 function setupModals() {
   $('#btnConfirmCancel').addEventListener('click', () => closeModal('#confirmModal'));
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') closeModal('#confirmModal'); });
-
-  $('#riwayatModal').addEventListener('click', (e) => { if (e.target.id === 'riwayatModal') closeModal('#riwayatModal'); });
 
   $('#btnClearHistory').addEventListener('click', () => {
     if (!state.sessionLog.length) { toast('Riwayat sudah kosong.', 'success', 1800); return; }
@@ -1315,6 +1395,7 @@ function setupTabs() {
    BOTTOM NAV — Beranda / Riwayat / Akun
    ========================================================================= */
 const NAV_ORDER = ['home', 'riwayat', 'akun'];
+const NAV_PAGE_IDS = { home: 'pageHome', riwayat: 'pageRiwayat', akun: 'pageAkun' };
 
 function setNavActive(navKey) {
   const idx = NAV_ORDER.indexOf(navKey);
@@ -1323,20 +1404,29 @@ function setNavActive(navKey) {
   if (indicator) indicator.className = `bn-indicator pos-${idx < 0 ? 0 : idx}`;
 }
 
+/**
+ * Ganti page yang tampil (Beranda/Riwayat/Akun). Menggantikan pola modal
+ * bottom-sheet yang muncul dari bawah — sekarang murni tukar konten di
+ * tempat, kayak berpindah halaman biasa, jadi lebih instan & stabil.
+ */
+function setActivePage(navKey) {
+  Object.entries(NAV_PAGE_IDS).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', key === navKey);
+  });
+  $('.scroll').scrollTo({ top: 0, behavior: 'auto' });
+}
+
 function setupBottomNav() {
   $$('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const nav = btn.dataset.nav;
-      if (nav === 'home') {
-        setNavActive('home');
-        setTab('import');
-        $('.scroll').scrollTo({ top: 0, behavior: 'smooth' });
-      } else if (nav === 'riwayat') {
-        setNavActive('riwayat');
-        openModal('#riwayatModal');
+      setNavActive(nav);
+      setActivePage(nav);
+      if (nav === 'riwayat') {
+        renderSessionLog();
       } else if (nav === 'akun') {
-        setNavActive('akun');
-        openAcctModal();
+        renderAkunPage();
       }
     });
   });
@@ -1385,12 +1475,15 @@ function init() {
   setupQuickEntry();
   setupManualForm();
   setupModals();
-  setupAcctModal();
+  setupAkunPage();
   setupModalDrag();
   setupTabs();
   setupBottomNav();
   setupThemeToggle();
   setupImportSheetSelect();
+
+  const monthPill = $('#monthPill');
+  if (monthPill) monthPill.addEventListener('click', openSheetPicker);
 
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
 
