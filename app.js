@@ -33,6 +33,7 @@ const state = {
   formulaSep: ';',           // pemisah argumen formula — dideteksi otomatis dari locale spreadsheet
   activeSheetName: null,
   lockedSheetName: null,     // kalau terisi, dipakai terus lintas reload/tutup PWA sampai diganti/dilepas
+  autoCreatePromptDismissedFor: null, // nama sheet yang tawaran auto-buatnya sudah ditutup user di sesi ini
   availableSheets: [],
   activeSheetHeaderRow: 6,   // baris header "Tanggal | Nomor Faktur..." (1-indexed)
   saldoAwal: 0,
@@ -423,102 +424,134 @@ function detectPreferredSheetName(sheetNames) {
   return sheetNames[sheetNames.length - 1];
 }
 
+/**
+ * Baca & parse struktur sebuah sheet (baris header, baris "Saldo Akhir",
+ * saldo awal, baris data terakhir, saldo & rekap saat ini). Dipisah dari
+ * loadActiveSheetContext supaya bisa dipakai ulang untuk sheet manapun —
+ * termasuk sheet template saat membuat sheet bulan baru.
+ */
+async function readSheetStructure(sheetName) {
+  const range = `'${sheetName}'!A1:F200`;
+  const data = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}`);
+  const rows = data.values || [];
+
+  let headerRow = -1;
+  let saldoAkhirRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r && r[1] === 'Tanggal' && r[2] === 'Nomor Faktur Penjualan') headerRow = i;
+    if (r && r[1] === 'Saldo Akhir') { saldoAkhirRow = i; break; }
+  }
+  if (headerRow === -1) throw new Error(`Header kolom tidak ditemukan di sheet ${sheetName}.`);
+
+  const saldoAwalRow = rows[headerRow + 1] || [];
+  const saldoAwal = parseFloat(saldoAwalRow[5]) || 0;
+
+  let lastFilled = headerRow + 1; // minimal saldo-awal row
+  const scanEnd = saldoAkhirRow > -1 ? saldoAkhirRow : rows.length;
+  for (let i = headerRow + 2; i < scanEnd; i++) {
+    const r = rows[i];
+    if (r && (r[1] || r[2] || r[3] || r[4])) lastFilled = i;
+  }
+
+  // hitung current saldo dari kolom F baris terakhir yg terisi.
+  // Kalau cell itu berisi error formula (#ERROR!, #REF!, dst), mundur ke
+  // baris valid terakhir supaya nilainya tetap akurat, bukan NaN.
+  let currentSaldo = NaN;
+  for (let i = lastFilled; i >= headerRow + 1; i--) {
+    const v = (rows[i] || [])[5];
+    if (v === undefined || v === '') continue;
+    const n = parseFloat(v);
+    if (!isNaN(n)) { currentSaldo = n; break; }
+  }
+  if (isNaN(currentSaldo)) currentSaldo = saldoAwal;
+
+  let totalCredit = 0, totalDebit = 0;
+  for (let i = headerRow + 2; i <= lastFilled; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    totalCredit += parseFloat(r[3]) || 0;
+    totalDebit += parseFloat(r[4]) || 0;
+  }
+
+  return {
+    rows, headerRow, saldoAkhirRow, lastFilled, saldoAwal, currentSaldo, totalCredit, totalDebit,
+    headerRow1: headerRow + 1,                                   // 1-indexed baris header
+    saldoAkhirRow1: saldoAkhirRow > -1 ? saldoAkhirRow + 1 : null, // 1-indexed baris "Saldo Akhir"
+    lastSaldoRow1: lastFilled + 1,                                 // 1-indexed baris data/saldo-awal terakhir
+  };
+}
+
+/**
+ * Terapkan struktur sheet yang sudah dibaca ke state & UI (ringkasan saldo,
+ * dropdown sheet, peringatan formula error).
+ */
+function applySheetStructureToState(struct) {
+  state.activeSheetHeaderRow = struct.headerRow1;
+  state.saldoAwal = struct.saldoAwal;
+  state.lastSaldoRow = struct.lastSaldoRow1;
+  state.saldoAkhirRow = struct.saldoAkhirRow1;
+
+  updateSummary(struct.currentSaldo, struct.totalCredit, struct.totalDebit);
+  populateImportSheetSelect();
+
+  // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
+  // kemungkinan besar butuh diperbaiki manual di sheet (mis. locale formula lama).
+  const hasFormulaError = struct.rows.slice(struct.headerRow + 1, struct.lastFilled + 1)
+    .some(r => typeof (r || [])[5] === 'string' && (r[5].includes('#ERROR') || r[5].includes('#REF') || r[5].includes('#N/A')));
+  if (hasFormulaError) {
+    toast('Ada baris Saldo berisi error formula di sheet ini — cek manual sebelum menulis data baru.', 'error', 5500);
+  }
+}
+
 async function findActiveSheet() {
   const sheetNames = await loadSpreadsheetMeta();
   return detectPreferredSheetName(sheetNames);
 }
 
 /**
- * Baca struktur sheet aktif: cari baris header, baris "Saldo Akhir",
- * baris data terakhir, dan nilai saldo saat ini.
+ * Baca struktur sheet aktif dan terapkan ke UI. Kalau tidak ada override
+ * dan sheet bulan berjalan ternyata belum ada di spreadsheet, tetap tampilkan
+ * sheet terbaru yang ada sebagai fallback sementara, lalu tawarkan pembuatan
+ * sheet baru otomatis (sekali per nama sheet per sesi, tidak nge-spam).
  */
 async function loadActiveSheetContext(overrideSheetName) {
   try {
+    let targetName;
+    let sheetMissing = null;
+
     if (overrideSheetName) {
       // pastikan locale & daftar sheet tetap ter-refresh walau memilih sheet manual
       if (!state.availableSheets.length || !state.spreadsheetLocale) await loadSpreadsheetMeta();
-      state.activeSheetName = overrideSheetName;
+      targetName = overrideSheetName;
     } else {
       const sheetNames = await loadSpreadsheetMeta();
       if (state.lockedSheetName && sheetNames.includes(state.lockedSheetName)) {
         // sheet yang dikunci user masih ada -> tetap pakai itu, jangan auto-pindah bulan
-        state.activeSheetName = state.lockedSheetName;
+        targetName = state.lockedSheetName;
       } else {
         if (state.lockedSheetName) {
           // sheet yang dikunci sudah tidak ada lagi (dihapus/diganti nama) -> lepas kunci basi
           unlockSheet();
         }
-        state.activeSheetName = detectPreferredSheetName(sheetNames);
+        const exactPreferred = currentMonthSheetName();
+        if (sheetNames.includes(exactPreferred)) {
+          targetName = exactPreferred;
+        } else {
+          targetName = detectPreferredSheetName(sheetNames);
+          sheetMissing = exactPreferred;
+        }
       }
     }
+
+    state.activeSheetName = targetName;
     refreshSheetLockUI();
 
-    const range = `'${state.activeSheetName}'!A1:F200`;
-    const data = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}`);
-    const rows = data.values || [];
+    const struct = await readSheetStructure(targetName);
+    applySheetStructureToState(struct);
 
-    let headerRow = -1;
-    let saldoAkhirRow = -1;
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      if (r && r[1] === 'Tanggal' && r[2] === 'Nomor Faktur Penjualan') headerRow = i;
-      if (r && r[1] === 'Saldo Akhir') { saldoAkhirRow = i; break; }
-    }
-    if (headerRow === -1) throw new Error('Header kolom tidak ditemukan di sheet.');
-
-    state.activeSheetHeaderRow = headerRow + 1; // 1-indexed
-    // baris saldo awal = header+1 (kolom F biasanya sudah terisi saldo carry-over)
-    const saldoAwalRow = rows[headerRow + 1] || [];
-    state.saldoAwal = parseFloat(saldoAwalRow[5]) || 0;
-
-    // cari baris data terakhir yang terisi (antara header+2 s/d sebelum Saldo Akhir)
-    let lastFilled = headerRow + 1; // minimal saldo-awal row
-    if (saldoAkhirRow > -1) {
-      for (let i = headerRow + 2; i < saldoAkhirRow; i++) {
-        const r = rows[i];
-        if (r && (r[1] || r[2] || r[3] || r[4])) lastFilled = i;
-      }
-      state.saldoAkhirRow = saldoAkhirRow + 1; // 1-indexed
-    } else {
-      for (let i = headerRow + 2; i < rows.length; i++) {
-        const r = rows[i];
-        if (r && (r[1] || r[2] || r[3] || r[4])) lastFilled = i;
-      }
-      state.saldoAkhirRow = null;
-    }
-    state.lastSaldoRow = lastFilled + 1; // 1-indexed baris terakhir berisi data/saldo-awal
-
-    // hitung current saldo dari kolom F baris terakhir yg terisi.
-    // Kalau cell itu berisi error formula (#ERROR!, #REF!, dst — muncul sebagai
-    // string literal dari Sheets API), mundur ke baris valid terakhir supaya
-    // saldo yang ditampilkan tetap akurat, bukan NaN yang menyesatkan.
-    let currentSaldo = NaN;
-    for (let i = lastFilled; i >= headerRow + 1; i--) {
-      const v = (rows[i] || [])[5];
-      if (v === undefined || v === '') continue;
-      const n = parseFloat(v);
-      if (!isNaN(n)) { currentSaldo = n; break; }
-    }
-    if (isNaN(currentSaldo)) currentSaldo = state.saldoAwal;
-
-    // hitung total credit/debit bulan ini (jumlahkan kolom D & E dari header+2 s/d lastFilled)
-    let totalCredit = 0, totalDebit = 0;
-    for (let i = headerRow + 2; i <= lastFilled; i++) {
-      const r = rows[i];
-      if (!r) continue;
-      totalCredit += parseFloat(r[3]) || 0;
-      totalDebit += parseFloat(r[4]) || 0;
-    }
-
-    updateSummary(currentSaldo, totalCredit, totalDebit);
-    populateImportSheetSelect();
-
-    // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
-    // kemungkinan besar butuh diperbaiki manual di sheet (mis. locale formula lama).
-    const hasFormulaError = rows.slice(headerRow + 1, lastFilled + 1)
-      .some(r => typeof (r || [])[5] === 'string' && (r[5].includes('#ERROR') || r[5].includes('#REF') || r[5].includes('#N/A')));
-    if (hasFormulaError) {
-      toast('Ada baris Saldo berisi error formula di sheet ini — cek manual sebelum menulis data baru.', 'error', 5500);
+    if (sheetMissing && state.autoCreatePromptDismissedFor !== sheetMissing) {
+      openCreateSheetModal(sheetMissing);
     }
   } catch (e) {
     console.error(e);
@@ -1043,6 +1076,111 @@ async function insertRowsBeforeSaldoAkhir(count) {
   state.saldoAkhirRow += count;
 }
 
+/* =========================================================================
+   BUAT SHEET BULAN BARU (otomatis)
+   Menyalin struktur (header, format, rumus) dari sheet paling akhir yang
+   ada, mengosongkan baris transaksinya, lalu mengisi saldo awal dari
+   saldo akhir sheet sumber — supaya kontinuitas saldo tetap terjaga.
+   ========================================================================= */
+
+/**
+ * Buka modal "Buat Sheet Bulan Baru" dengan nama yang disarankan sudah terisi.
+ * Dipanggil baik dari deteksi otomatis (sheet bulan berjalan belum ada)
+ * maupun dari tombol manual di modal Pilih Sheet Bulan.
+ */
+function openCreateSheetModal(suggestedName) {
+  const templateName = state.availableSheets[state.availableSheets.length - 1] || '—';
+  $('#createSheetBasedOn').textContent = templateName;
+  $('#createSheetNameInput').value = suggestedName || '';
+  openModal('#createSheetModal');
+}
+
+/**
+ * Duplikasi sheet paling akhir (template) jadi sheet baru dengan nama yang
+ * diminta: format & rumus ikut tersalin, baris transaksi lama dikosongkan,
+ * dan saldo awal baris pertama diisi angka polos dari saldo akhir template.
+ */
+async function createMonthSheet(newName) {
+  const meta = await getSpreadsheetMeta();
+  const sheetList = meta.sheets;
+  const templateName = state.availableSheets[state.availableSheets.length - 1];
+  const templateProps = sheetList.find(s => s.properties.title === templateName)?.properties;
+  if (!templateProps) throw new Error('Sheet template untuk disalin tidak ditemukan.');
+
+  const struct = await readSheetStructure(templateName);
+
+  // 1. duplikasi sheet template ke posisi paling akhir dengan nama baru
+  await sheetsFetch(`${state.spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify({
+      requests: [{
+        duplicateSheet: {
+          sourceSheetId: templateProps.sheetId,
+          insertSheetIndex: sheetList.length,
+          newSheetName: newName,
+        }
+      }]
+    }),
+  });
+
+  // 2. kosongkan baris transaksi lama (antara baris saldo-awal & "Saldo Akhir")
+  const clearFromRow = struct.headerRow1 + 2;
+  const clearToRow = struct.saldoAkhirRow1 ? struct.saldoAkhirRow1 - 1 : struct.lastSaldoRow1;
+  if (clearToRow >= clearFromRow) {
+    const clearRange = `'${newName}'!B${clearFromRow}:F${clearToRow}`;
+    await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(clearRange)}:clear`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  // 3. isi saldo awal baris pertama dengan saldo akhir sheet template (angka polos, bukan rumus)
+  const saldoAwalRange = `'${newName}'!F${struct.headerRow1 + 1}`;
+  await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(saldoAwalRange)}?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    body: JSON.stringify({ range: saldoAwalRange, values: [[struct.currentSaldo]] }),
+  });
+
+  await loadSpreadsheetMeta(); // refresh availableSheets biar sheet baru langsung muncul di daftar
+}
+
+async function executeCreateMonthSheet() {
+  const name = $('#createSheetNameInput').value.trim();
+  if (!name) { toast('Nama sheet tidak boleh kosong.', 'error'); return; }
+  if (state.availableSheets.includes(name)) { toast('Sheet dengan nama itu sudah ada.', 'error'); return; }
+
+  const btn = $('#btnCreateSheetConfirm');
+  setButtonLoading(btn, true, 'Membuat sheet…');
+  try {
+    await createMonthSheet(name);
+    closeModal('#createSheetModal');
+    toast(`Sheet ${name} berhasil dibuat.`, 'success');
+    lockSheet(name);
+    await loadActiveSheetContext(name);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Gagal membuat sheet baru.', 'error');
+  } finally {
+    setButtonLoading(btn, false, 'Buat Sheet Sekarang');
+  }
+}
+
+function setupCreateSheetModal() {
+  $('#btnCreateSheetConfirm').addEventListener('click', executeCreateMonthSheet);
+
+  const dismiss = () => {
+    state.autoCreatePromptDismissedFor = $('#createSheetNameInput').value.trim() || null;
+    closeModal('#createSheetModal');
+  };
+  $('#btnCreateSheetCancel').addEventListener('click', dismiss);
+  $('#createSheetModal').addEventListener('click', (e) => { if (e.target.id === 'createSheetModal') dismiss(); });
+
+  $('#btnOpenCreateSheet').addEventListener('click', () => {
+    closeModal('#sheetPickerModal');
+    openCreateSheetModal(currentMonthSheetName());
+  });
+}
+
 function resetImportPanel() {
   state.parsedDays = [];
   $('#previewCard').classList.add('hidden');
@@ -1475,6 +1613,7 @@ function init() {
   setupQuickEntry();
   setupManualForm();
   setupModals();
+  setupCreateSheetModal();
   setupAkunPage();
   setupModalDrag();
   setupTabs();
