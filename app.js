@@ -430,6 +430,20 @@ function detectPreferredSheetName(sheetNames) {
  * loadActiveSheetContext supaya bisa dipakai ulang untuk sheet manapun —
  * termasuk sheet template saat membuat sheet bulan baru.
  */
+/**
+ * Konversi index kolom (0-based) ke huruf kolom spreadsheet (0->A, 1->B, ... 26->AA).
+ */
+function colLetter(idx) {
+  let n = idx + 1;
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
 async function readSheetStructure(sheetName) {
   const range = `'${sheetName}'!A1:F200`;
   const data = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}`);
@@ -437,10 +451,15 @@ async function readSheetStructure(sheetName) {
 
   let headerRow = -1;
   let saldoAkhirRow = -1;
+  let periodeRow = -1, periodeCol = -1, periodeText = null;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (r && r[1] === 'Tanggal' && r[2] === 'Nomor Faktur Penjualan') headerRow = i;
     if (r && r[1] === 'Saldo Akhir') { saldoAkhirRow = i; break; }
+    if (periodeRow === -1 && r) {
+      const col = r.findIndex(c => typeof c === 'string' && /periode/i.test(c));
+      if (col > -1) { periodeRow = i; periodeCol = col; periodeText = r[col]; }
+    }
   }
   if (headerRow === -1) throw new Error(`Header kolom tidak ditemukan di sheet ${sheetName}.`);
 
@@ -479,6 +498,8 @@ async function readSheetStructure(sheetName) {
     headerRow1: headerRow + 1,                                   // 1-indexed baris header
     saldoAkhirRow1: saldoAkhirRow > -1 ? saldoAkhirRow + 1 : null, // 1-indexed baris "Saldo Akhir"
     lastSaldoRow1: lastFilled + 1,                                 // 1-indexed baris data/saldo-awal terakhir
+    periodeRow1: periodeRow > -1 ? periodeRow + 1 : null,          // 1-indexed baris judul "Periode ..."
+    periodeCol, periodeText,
   };
 }
 
@@ -1140,6 +1161,19 @@ async function createMonthSheet(newName) {
     method: 'PUT',
     body: JSON.stringify({ range: saldoAwalRange, values: [[struct.currentSaldo]] }),
   });
+
+  // 4. samakan teks judul "Periode ..." (mis. "SO PGR : Periode JUNI 2026") dengan nama sheet baru,
+  //    biar nggak ketinggalan nama bulan template lama pas disalin.
+  if (struct.periodeRow1 && struct.periodeCol > -1 && struct.periodeText) {
+    const newPeriodeText = struct.periodeText.replace(/(periode\s+).*/i, (_, prefix) => prefix + newName);
+    if (newPeriodeText !== struct.periodeText) {
+      const periodeRange = `'${newName}'!${colLetter(struct.periodeCol)}${struct.periodeRow1}`;
+      await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(periodeRange)}?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        body: JSON.stringify({ range: periodeRange, values: [[newPeriodeText]] }),
+      });
+    }
+  }
 
   await loadSpreadsheetMeta(); // refresh availableSheets biar sheet baru langsung muncul di daftar
 }
