@@ -12,7 +12,10 @@ const STORAGE_KEYS = {
   sheetId: 'inges_sheet_id',
   token: 'inges_gtoken',
   tokenExp: 'inges_gtoken_exp',
+  sessionLog: 'inges_session_log',
 };
+
+const SESSION_LOG_MAX_ENTRIES = 200; // batas biar localStorage tidak membengkak tak terbatas
 
 // Nama bulan Indonesia -> dipakai untuk menentukan nama sheet aktif otomatis
 const BULAN_ID = ['JAN','FEB','MAR','APR','MEI','JUN','JUL','AGTS','SEPT','OKT','NOV','DES'];
@@ -585,6 +588,20 @@ function buildFakturRange(sortedFakturs) {
   return `${firstNum}-${lastNum}${suffix}`;
 }
 
+/**
+ * Bangun range nomor faktur untuk input cepat manual (bukan dari CSV) —
+ * PIC cukup isi nomor faktur awal + jumlah unit terjual, Inges menghitung
+ * nomor akhir dan merangkainya dengan format yang sama seperti hasil import CSV.
+ * Contoh: startNum=252, unitCount=4, suffix="PGR/VII/2026"
+ *         -> "252-255/PGR/VII/2026"
+ */
+function buildQuickFakturRange(startNum, unitCount, suffix) {
+  const cleanSuffix = suffix.replace(/^\/+/, ''); // buang slash di depan kalau PIC ikut mengetiknya
+  if (unitCount <= 1) return `${startNum}/${cleanSuffix}`;
+  const endNum = startNum + unitCount - 1;
+  return `${startNum}-${endNum}/${cleanSuffix}`;
+}
+
 function formatTanggalDisplay(dateObj) {
   if (!dateObj) return { d: '--', mo: '---' };
   const bulanShort = ['JAN','FEB','MAR','APR','MEI','JUN','JUL','AGU','SEP','OKT','NOV','DES'];
@@ -625,6 +642,115 @@ function setupDropzone() {
   });
 }
 
+/**
+ * Sub-tab di panel "Cek Fisik Keluar": Upload CSV (batch, dari export
+ * program) vs Input Cepat (manual, satu kali entri langsung dari PIC
+ * tanpa perlu menunggu file CSV). Keduanya menulis ke struktur
+ * state.parsedDays yang sama, jadi bisa dicampur dalam satu sesi
+ * (mis. upload CSV lalu tambah 1 transaksi susulan secara manual)
+ * sebelum benar-benar ditulis ke Google Sheets.
+ */
+function setupImportSubTabs() {
+  const chipCsv = $('#subChipCsv');
+  const chipManual = $('#subChipManual');
+  const subCsv = $('#subImportCsv');
+  const subManual = $('#subImportManual');
+  const desc = $('#importSubDesc');
+
+  const descCsv = 'Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal — setiap faktur terpakai 2 pcs cek fisik.';
+  const descManual = 'Input langsung kalau ada penjualan hari ini dan belum sempat export CSV. Cukup isi tanggal, jumlah unit, dan nomor faktur awal — Inges menghitung sisanya.';
+
+  chipCsv.addEventListener('click', () => {
+    chipCsv.classList.add('active');
+    chipManual.classList.remove('active');
+    subCsv.classList.remove('hidden');
+    subManual.classList.add('hidden');
+    desc.textContent = descCsv;
+  });
+
+  chipManual.addEventListener('click', () => {
+    chipManual.classList.add('active');
+    chipCsv.classList.remove('active');
+    subManual.classList.remove('hidden');
+    subCsv.classList.add('hidden');
+    desc.textContent = descManual;
+  });
+}
+
+function setupQuickEntry() {
+  const dateEl = $('#quickDate');
+  const unitEl = $('#quickUnitCount');
+  const fakturStartEl = $('#quickFakturStart');
+  const suffixEl = $('#quickFakturSuffix');
+  const previewBox = $('#quickPreviewBox');
+  const btnAdd = $('#btnQuickAdd');
+
+  // default: tanggal hari ini, suffix mengikuti bulan-romawi & tahun berjalan
+  dateEl.value = new Date().toISOString().slice(0, 10);
+  suffixEl.value = `PGR/${toRomanMonth(new Date().getMonth() + 1)}/${new Date().getFullYear()}`;
+
+  const revalidate = () => {
+    const unitCount = parseInt(unitEl.value, 10);
+    const startNum = parseInt(fakturStartEl.value, 10);
+    const suffix = suffixEl.value.trim();
+    const dateVal = dateEl.value;
+
+    const valid = dateVal && unitCount > 0 && startNum > 0 && suffix.length > 0;
+    btnAdd.disabled = !valid;
+
+    if (valid) {
+      const range = buildQuickFakturRange(startNum, unitCount, suffix);
+      const debit = unitCount * 2;
+      $('#quickPreviewRange').textContent = range;
+      $('#quickPreviewDebit').textContent = `-${debit} pcs`;
+      previewBox.classList.remove('hidden');
+    } else {
+      previewBox.classList.add('hidden');
+    }
+  };
+
+  [dateEl, unitEl, fakturStartEl, suffixEl].forEach(el => el.addEventListener('input', revalidate));
+  revalidate();
+
+  btnAdd.addEventListener('click', () => {
+    const unitCount = parseInt(unitEl.value, 10);
+    const startNum = parseInt(fakturStartEl.value, 10);
+    const suffix = suffixEl.value.trim();
+    const dateObj = new Date(dateEl.value + 'T00:00:00');
+
+    const entry = {
+      tanggalRaw: formatTanggalForSheet(dateObj),
+      dateObj,
+      fakturs: [], // tidak relevan untuk entri manual (tidak ada daftar faktur individual dari CSV)
+      count: unitCount,
+      debit: unitCount * 2,
+      fakturRange: buildQuickFakturRange(startNum, unitCount, suffix),
+      source: 'manual',
+    };
+
+    state.parsedDays.push(entry);
+    state.parsedDays.sort((a, b) => (a.dateObj?.getTime() || 0) - (b.dateObj?.getTime() || 0));
+    renderPreview(state.parsedDays);
+
+    $('#btnUpload').disabled = false;
+    $('#btnUpload').classList.remove('hidden');
+
+    toast(`${unitCount} unit ditambahkan ke pratinjau (${entry.fakturRange})`, 'success', 2500);
+
+    // reset form input cepat, siap untuk entri berikutnya, tanggal & suffix dipertahankan
+    unitEl.value = '';
+    fakturStartEl.value = '';
+    previewBox.classList.add('hidden');
+    btnAdd.disabled = true;
+  });
+}
+
+/** Konversi angka bulan (1-12) ke angka romawi, dipakai untuk format kode faktur. */
+function toRomanMonth(month) {
+  const romans = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
+  return romans[month - 1] || 'I';
+}
+
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv') {
     toast('Format file harus .csv', 'error');
@@ -657,15 +783,23 @@ function processCSVText(text, filename) {
   const strip = $('#swipeStrip');
   try {
     $('#swipeFill').style.width = '55%';
-    const days = parseCSV(text);
-    state.parsedDays = days;
+    const csvDays = parseCSV(text);
+
+    // Gabungkan dengan entri manual yang sudah ada di pratinjau (kalau ada),
+    // bukan menimpa — supaya input cepat yang sudah ditambahkan PIC tidak hilang
+    // saat upload CSV dilakukan sesudahnya. Kalau tanggalnya sama persis,
+    // keduanya tetap dipertahankan sebagai baris terpisah (CSV tidak menimpa manual).
+    const existingManual = state.parsedDays.filter(d => d.source === 'manual');
+    const merged = [...csvDays, ...existingManual];
+    merged.sort((a, b) => (a.dateObj?.getTime() || 0) - (b.dateObj?.getTime() || 0));
+    state.parsedDays = merged;
 
     setTimeout(() => {
       $('#swipeFill').style.width = '100%';
       strip.classList.remove('scanning');
       $('#dzTitle').textContent = 'Berhasil dibaca';
-      $('#dzSub').textContent = `${days.length} hari terdeteksi · ${days.reduce((s, d) => s + d.count, 0)} faktur`;
-      renderPreview(days);
+      $('#dzSub').textContent = `${csvDays.length} hari terdeteksi · ${csvDays.reduce((s, d) => s + d.count, 0)} faktur`;
+      renderPreview(state.parsedDays);
       $('#btnUpload').disabled = false;
       $('#btnUpload').classList.remove('hidden');
       toast(`Berhasil membaca ${filename}`, 'success');
@@ -698,11 +832,26 @@ function renderPreview(days) {
       <div class="day-date"><b>${d}</b><span>${mo}</span></div>
       <div class="day-info">
         <div class="faktur-range">${day.fakturRange}</div>
-        <div class="unit-count">${day.count} unit terjual</div>
+        <div class="unit-count">${day.count} unit terjual${day.source === 'manual' ? ' · input cepat' : ''}</div>
       </div>
       <div class="day-debit">-${day.debit}<small>pcs</small></div>
+      <button class="preview-row-remove" data-idx="${idx}" aria-label="Hapus baris ini">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
     `;
     list.appendChild(row);
+  });
+
+  $$('.preview-row-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      state.parsedDays.splice(idx, 1);
+      if (!state.parsedDays.length) {
+        resetImportPanel();
+      } else {
+        renderPreview(state.parsedDays);
+      }
+    });
   });
 }
 
@@ -770,7 +919,11 @@ async function executeImportWrite() {
 
     closeModal('#confirmModal');
     toast(`${values.length} baris berhasil ditulis ke ${state.activeSheetName}`, 'success');
-    logSession('import', `${values.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit)`);
+    const manualCount = state.parsedDays.filter(d => d.source === 'manual').length;
+    const logDesc = manualCount > 0
+      ? `${values.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit, ${manualCount} input cepat)`
+      : `${values.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit)`;
+    logSession('import', logDesc);
     resetImportPanel();
     await loadActiveSheetContext();
   } catch (err) {
@@ -817,6 +970,15 @@ function resetImportPanel() {
   $('#swipeStrip').classList.add('hidden');
   $('#swipeFill').style.width = '0%';
   $('#fileInput').value = '';
+
+  const unitEl = $('#quickUnitCount');
+  const fakturStartEl = $('#quickFakturStart');
+  if (unitEl) unitEl.value = '';
+  if (fakturStartEl) fakturStartEl.value = '';
+  const quickBox = $('#quickPreviewBox');
+  if (quickBox) quickBox.classList.add('hidden');
+  const btnAdd = $('#btnQuickAdd');
+  if (btnAdd) btnAdd.disabled = true;
 }
 
 /* =========================================================================
@@ -919,24 +1081,61 @@ async function executeManualWrite(dateObj, faktur, credit) {
 
 function logSession(type, desc) {
   state.sessionLog.unshift({ type, desc, time: new Date() });
+  if (state.sessionLog.length > SESSION_LOG_MAX_ENTRIES) {
+    state.sessionLog.length = SESSION_LOG_MAX_ENTRIES;
+  }
+  saveSessionLog();
   renderSessionLog();
+}
+
+function saveSessionLog() {
+  try {
+    // Date tidak bisa di-JSON.stringify langsung sebagai Date lagi, jadi disimpan sebagai ISO string
+    const serializable = state.sessionLog.map(item => ({ ...item, time: item.time.toISOString() }));
+    localStorage.setItem(STORAGE_KEYS.sessionLog, JSON.stringify(serializable));
+  } catch (e) {
+    console.error('Gagal menyimpan riwayat sesi:', e);
+  }
+}
+
+function loadSessionLog() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.sessionLog);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    state.sessionLog = parsed.map(item => ({ ...item, time: new Date(item.time) }));
+  } catch (e) {
+    console.error('Gagal memuat riwayat sesi:', e);
+    state.sessionLog = [];
+  }
+}
+
+function clearSessionLog() {
+  state.sessionLog = [];
+  localStorage.removeItem(STORAGE_KEYS.sessionLog);
+  renderSessionLog();
+  toast('Riwayat berhasil dihapus.', 'success');
 }
 
 function renderSessionLog() {
   const emptyHTML = `
     <div class="empty">
       <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <p>Belum ada input yang tercatat pada sesi ini.</p>
+      <p>Belum ada input yang tercatat.</p>
     </div>`;
 
+  const bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
   const listHTML = state.sessionLog.length
     ? state.sessionLog.map(item => `
       <div class="day-row" style="margin-bottom:8px;">
         <div class="day-date">
           <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
-          <span>${item.type === 'import' ? 'IMPORT' : 'MANUAL'}</span>
+          <span>${item.time.getDate()} ${bulanSingkat[item.time.getMonth()]}</span>
         </div>
-        <div class="day-info"><div class="faktur-range">${item.desc}</div></div>
+        <div class="day-info">
+          <div class="faktur-range">${item.desc}</div>
+          <div class="unit-count">${item.type === 'import' ? 'Cek Fisik Keluar' : 'Cek Fisik Masuk'}</div>
+        </div>
       </div>
     `).join('')
     : emptyHTML;
@@ -1038,6 +1237,13 @@ function setupModals() {
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') closeModal('#confirmModal'); });
 
   $('#riwayatModal').addEventListener('click', (e) => { if (e.target.id === 'riwayatModal') closeModal('#riwayatModal'); });
+
+  $('#btnClearHistory').addEventListener('click', () => {
+    if (!state.sessionLog.length) { toast('Riwayat sudah kosong.', 'success', 1800); return; }
+    if (confirm('Hapus semua riwayat yang tersimpan di perangkat ini? Tindakan ini tidak bisa dibatalkan.')) {
+      clearSessionLog();
+    }
+  });
 
   setupSheetIdAutoclean();
 
@@ -1175,6 +1381,8 @@ function setButtonLoading(btn, loading, label) {
 function init() {
   $('#btnSignIn').addEventListener('click', requestSignIn);
   setupDropzone();
+  setupImportSubTabs();
+  setupQuickEntry();
   setupManualForm();
   setupModals();
   setupAcctModal();
@@ -1187,6 +1395,7 @@ function init() {
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
 
   updateManualFakturPlaceholder();
+  loadSessionLog();
   renderSessionLog();
   initGoogleAuth();
 

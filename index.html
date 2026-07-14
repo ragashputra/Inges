@@ -367,6 +367,14 @@ input[type=file]{display:none;}
   white-space:nowrap;
 }
 .day-debit small{font-size:10px; color:var(--paper-faint); font-weight:500; display:block; text-align:right;}
+.preview-row-remove{
+  flex-shrink:0; width:28px; height:28px; border-radius:50%; border:none;
+  background:transparent; color:var(--paper-faint); cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.preview-row-remove svg{width:14px; height:14px;}
+.preview-row-remove:active{transform:scale(0.85); background:rgba(196,99,74,0.15); color:var(--rust-bright);}
 
 /* ---------- form (manual credit) ---------- */
 .field{margin-bottom:14px;}
@@ -396,6 +404,17 @@ input[type=file]{display:none;}
 }
 .chip-opt.active{background:var(--sage); border-color:var(--sage); color:var(--ink-0);}
 .chip-opt:active{transform:scale(0.94);}
+
+.quick-preview-box{
+  background:var(--ink-3); border:1px solid var(--line-soft); border-radius:var(--radius-sm);
+  padding:13px 15px; margin-top:6px; margin-bottom:14px;
+  display:flex; flex-direction:column; gap:8px;
+  animation: rowIn var(--dur-med) var(--ease-out);
+}
+.quick-preview-row{display:flex; align-items:center; justify-content:space-between; font-size:12.5px;}
+.quick-preview-row span{color:var(--paper-faint); font-weight:600;}
+.quick-preview-row b{font-family:var(--font-display); font-weight:700; font-size:14px;}
+.danger-text{color:var(--rust-bright) !important;}
 
 /* ---------- buttons ---------- */
 .btn-primary{
@@ -655,7 +674,12 @@ input[type=file]{display:none;}
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Cek Fisik Keluar
           </h3>
-          <p class="card-desc">Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal &mdash; setiap faktur terpakai 2 pcs cek fisik.</p>
+          <p class="card-desc" id="importSubDesc">Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal &mdash; setiap faktur terpakai 2 pcs cek fisik.</p>
+
+          <div class="chip-select" style="margin-bottom:16px;">
+            <div class="chip-opt active" id="subChipCsv" data-sub="csv">Upload CSV</div>
+            <div class="chip-opt" id="subChipManual" data-sub="manual">Input Cepat</div>
+          </div>
 
           <div class="field" style="margin-bottom:16px;">
             <label>Tulis ke Sheet Bulan</label>
@@ -666,19 +690,62 @@ input[type=file]{display:none;}
             </div>
           </div>
 
-          <div class="dropzone" id="dropzone">
-            <div class="dz-icon">
-              <svg viewBox="0 0 24 24" fill="none" id="dzIconSvg"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 2v6h6" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <!-- ---- SUB: Upload CSV ---- -->
+          <div id="subImportCsv">
+            <div class="dropzone" id="dropzone">
+              <div class="dz-icon">
+                <svg viewBox="0 0 24 24" fill="none" id="dzIconSvg"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 2v6h6" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="dz-title" id="dzTitle">Ketuk untuk pilih file CSV</div>
+              <div class="dz-sub" id="dzSub">atau tarik &amp; lepas di sini</div>
+              <div class="dz-filename hidden" id="dzFilename"></div>
+              <input type="file" id="fileInput" accept=".csv,text/csv">
             </div>
-            <div class="dz-title" id="dzTitle">Ketuk untuk pilih file CSV</div>
-            <div class="dz-sub" id="dzSub">atau tarik &amp; lepas di sini</div>
-            <div class="dz-filename hidden" id="dzFilename"></div>
-            <input type="file" id="fileInput" accept=".csv,text/csv">
+
+            <div class="swipe-strip hidden" id="swipeStrip">
+              <div class="fill" id="swipeFill"></div>
+              <div class="glint"></div>
+            </div>
           </div>
 
-          <div class="swipe-strip hidden" id="swipeStrip">
-            <div class="fill" id="swipeFill"></div>
-            <div class="glint"></div>
+          <!-- ---- SUB: Input Cepat (manual, tanpa CSV) ---- -->
+          <div id="subImportManual" class="hidden">
+            <div class="field">
+              <label>Tanggal Penjualan</label>
+              <input type="date" id="quickDate">
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label>Jumlah Unit Terjual</label>
+                <input type="number" id="quickUnitCount" placeholder="Contoh: 3" inputmode="numeric" min="1">
+              </div>
+              <div class="field">
+                <label>No. Faktur Awal</label>
+                <input type="text" id="quickFakturStart" placeholder="Contoh: 252" inputmode="numeric">
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Kode Faktur (bulan/tahun)</label>
+              <input type="text" id="quickFakturSuffix" placeholder="Contoh: PGR/VII/2026">
+            </div>
+
+            <div class="quick-preview-box hidden" id="quickPreviewBox">
+              <div class="quick-preview-row">
+                <span>Range faktur</span>
+                <b id="quickPreviewRange">—</b>
+              </div>
+              <div class="quick-preview-row">
+                <span>Debit cek fisik</span>
+                <b id="quickPreviewDebit" class="danger-text">—</b>
+              </div>
+            </div>
+
+            <button class="btn-primary" id="btnQuickAdd" disabled style="margin-top:4px;">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Tambah ke Pratinjau</span>
+            </button>
           </div>
         </div>
 
@@ -741,12 +808,12 @@ input[type=file]{display:none;}
         <div class="card">
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            Riwayat Terkirim Sesi Ini
+            Riwayat Terkirim
           </h3>
           <div id="sessionHistory">
             <div class="empty">
               <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <p>Belum ada input manual pada sesi ini.</p>
+              <p>Belum ada input yang tercatat.</p>
             </div>
           </div>
         </div>
@@ -794,14 +861,18 @@ input[type=file]{display:none;}
 <div class="modal-backdrop" id="riwayatModal">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <h3 class="modal-title">Riwayat Sesi Ini</h3>
-    <p class="modal-sub">Input yang berhasil ditulis ke Google Sheets pada sesi kamu saat ini.</p>
+    <h3 class="modal-title">Riwayat</h3>
+    <p class="modal-sub">Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.</p>
     <div id="riwayatList">
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <p>Belum ada input yang tercatat pada sesi ini.</p>
+        <p>Belum ada input yang tercatat.</p>
       </div>
     </div>
+    <button class="btn-danger" style="margin-top:14px;" id="btnClearHistory">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Hapus Riwayat
+    </button>
   </div>
 </div>
 
