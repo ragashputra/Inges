@@ -13,7 +13,8 @@ const STORAGE_KEYS = {
   token: 'inges_gtoken',
   tokenExp: 'inges_gtoken_exp',
   sessionLog: 'inges_session_log',
-  lockedSheet: 'inges_locked_sheet', // nama sheet bulan yang dikunci manual oleh user
+  lockedSheet: 'inges_locked_sheet',       // nama sheet bulan yang dikunci manual oleh user
+  lockedFakturSuffix: 'inges_locked_faktur_suffix', // kode faktur (mis. PGR/VII/2026) yang dikunci manual
 };
 
 const SESSION_LOG_MAX_ENTRIES = 200; // batas biar localStorage tidak membengkak tak terbatas
@@ -457,8 +458,8 @@ async function readSheetStructure(sheetName) {
     if (r && r[1] === 'Tanggal' && r[2] === 'Nomor Faktur Penjualan') headerRow = i;
     if (r && r[1] === 'Saldo Akhir') { saldoAkhirRow = i; break; }
     if (periodeRow === -1 && r) {
-      const col = r.findIndex(c => typeof c === 'string' && /periode/i.test(c));
-      if (col > -1) { periodeRow = i; periodeCol = col; periodeText = r[col]; }
+      const col = r.findIndex(c => c !== null && c !== undefined && c !== '' && /periode/i.test(String(c)));
+      if (col > -1) { periodeRow = i; periodeCol = col; periodeText = String(r[col]); }
     }
   }
   if (headerRow === -1) throw new Error(`Header kolom tidak ditemukan di sheet ${sheetName}.`);
@@ -513,7 +514,7 @@ function applySheetStructureToState(struct) {
   state.lastSaldoRow = struct.lastSaldoRow1;
   state.saldoAkhirRow = struct.saldoAkhirRow1;
 
-  updateSummary(struct.currentSaldo, struct.totalCredit, struct.totalDebit);
+  updateSummary(struct.currentSaldo, struct.totalCredit, struct.totalDebit, struct.saldoAwal);
   populateImportSheetSelect();
 
   // Peringatkan pengguna kalau ada baris Saldo berisi error formula —
@@ -620,7 +621,7 @@ function setupImportSheetSelect() {
   });
 }
 
-function updateSummary(saldo, credit, debit) {
+function updateSummary(saldo, credit, debit, saldoAwal) {
   const num = $('#saldoNum');
   if (isNaN(saldo)) {
     num.textContent = '—';
@@ -631,6 +632,7 @@ function updateSummary(saldo, credit, debit) {
   }
   $('#statCredit').textContent = formatNum(credit);
   $('#statDebit').textContent = formatNum(debit);
+  $('#statPrevSaldo').textContent = isNaN(saldoAwal) ? '—' : formatNum(saldoAwal);
 }
 
 function formatNum(n) {
@@ -824,16 +826,51 @@ function setupQuickEntry() {
   const suffixEl = $('#quickFakturSuffix');
   const previewBox = $('#quickPreviewBox');
   const btnAdd = $('#btnQuickAdd');
+  const btnLock = $('#btnLockFakturSuffix');
+  const lockIcon = $('#fakturLockIcon');
 
-  // default: tanggal hari ini, suffix mengikuti bulan-romawi & tahun berjalan
+  const iconLocked = '<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
+  const iconUnlocked = '<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 017.5-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
+
+  const defaultSuffix = () => `PGR/${toRomanMonth(new Date().getMonth() + 1)}/${new Date().getFullYear()}`;
+
+  const savedSuffix = localStorage.getItem(STORAGE_KEYS.lockedFakturSuffix);
+  let suffixLocked = !!savedSuffix;
+
+  const refreshLockUI = () => {
+    btnLock.classList.toggle('locked', suffixLocked);
+    lockIcon.innerHTML = suffixLocked ? iconLocked : iconUnlocked;
+    btnLock.title = suffixLocked ? 'Kode faktur terkunci — klik buat lepas' : 'Kunci kode faktur biar nggak berubah saat reload';
+  };
+
+  // default: tanggal hari ini. Kode faktur pakai yang dikunci kalau ada,
+  // kalau nggak ikut bulan-romawi & tahun berjalan seperti biasa.
   dateEl.value = new Date().toISOString().slice(0, 10);
-  suffixEl.value = `PGR/${toRomanMonth(new Date().getMonth() + 1)}/${new Date().getFullYear()}`;
+  suffixEl.value = suffixLocked ? savedSuffix : defaultSuffix();
+  refreshLockUI();
+
+  btnLock.addEventListener('click', () => {
+    suffixLocked = !suffixLocked;
+    if (suffixLocked) {
+      localStorage.setItem(STORAGE_KEYS.lockedFakturSuffix, suffixEl.value.trim());
+      toast(`Kode faktur dikunci: ${suffixEl.value.trim()}`, 'success', 2200);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.lockedFakturSuffix);
+      suffixEl.value = defaultSuffix();
+      toast('Kode faktur nggak dikunci lagi — ikut bulan berjalan otomatis.', 'success', 2200);
+      revalidate();
+    }
+    refreshLockUI();
+  });
 
   const revalidate = () => {
     const unitCount = parseInt(unitEl.value, 10);
     const startNum = parseInt(fakturStartEl.value, 10);
     const suffix = suffixEl.value.trim();
     const dateVal = dateEl.value;
+
+    // selagi dikunci, ikutin terus perubahan yang diketik user
+    if (suffixLocked) localStorage.setItem(STORAGE_KEYS.lockedFakturSuffix, suffix);
 
     const valid = dateVal && unitCount > 0 && startNum > 0 && suffix.length > 0;
     btnAdd.disabled = !valid;
@@ -1165,14 +1202,21 @@ async function createMonthSheet(newName) {
   // 4. samakan teks judul "Periode ..." (mis. "SO PGR : Periode JUNI 2026") dengan nama sheet baru,
   //    biar nggak ketinggalan nama bulan template lama pas disalin.
   if (struct.periodeRow1 && struct.periodeCol > -1 && struct.periodeText) {
-    const newPeriodeText = struct.periodeText.replace(/(periode\s+).*/i, (_, prefix) => prefix + newName);
+    // regex longgar: tangkap "periode" + pemisah apapun (spasi/titik dua/campuran),
+    // sisanya (nama bulan+tahun lama) diganti nama sheet baru.
+    const newPeriodeText = struct.periodeText.replace(/(periode[\s:]*)(.*)$/i, (_, prefix) => prefix + newName);
     if (newPeriodeText !== struct.periodeText) {
       const periodeRange = `'${newName}'!${colLetter(struct.periodeCol)}${struct.periodeRow1}`;
       await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(periodeRange)}?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         body: JSON.stringify({ range: periodeRange, values: [[newPeriodeText]] }),
       });
+      toast(`Judul periode ikut diperbarui: "${newPeriodeText}".`, 'success', 3200);
+    } else {
+      toast(`Teks "Periode" ketemu di ${colLetter(struct.periodeCol)}${struct.periodeRow1} tapi polanya nggak cocok buat diganti otomatis — cek manual ya.`, 'error', 6000);
     }
+  } else {
+    toast('Teks "Periode" nggak ketemu otomatis di sheet template (mungkin itu text box/gambar, bukan isi cell) — judul periode perlu diedit manual.', 'error', 6000);
   }
 
   await loadSpreadsheetMeta(); // refresh availableSheets biar sheet baru langsung muncul di daftar
@@ -1400,6 +1444,9 @@ function renderSessionLog() {
 
   const riwayatList = $('#riwayatList');
   if (riwayatList) riwayatList.innerHTML = listHTML;
+
+  const btnClear = $('#btnClearHistory');
+  if (btnClear) btnClear.classList.toggle('hidden', state.sessionLog.length === 0);
 }
 
 /* =========================================================================

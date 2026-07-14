@@ -268,12 +268,13 @@ input,select,textarea{font-family:inherit;}
 .saldo-num{font-family:var(--font-display); font-size:44px; font-weight:700; letter-spacing:-0.02em; transition:color var(--dur-med) var(--ease-out);}
 .saldo-num.neg{color:var(--rust-bright);}
 .saldo-unit{font-size:13px; color:var(--paper-faint); font-weight:600;}
-.summary-stats{display:flex; gap:10px; margin-top:16px;}
-.stat-mini{flex:1; background:rgba(0,0,0,0.18); border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:10px 12px; transition:border-color var(--dur-med) var(--ease-out);}
-.stat-mini b{display:block; font-family:var(--font-display); font-size:18px; font-weight:600;}
-.stat-mini span{font-size:10.5px; color:var(--paper-faint); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;}
+.summary-stats{display:flex; gap:8px; margin-top:16px;}
+.stat-mini{flex:1; min-width:0; background:rgba(0,0,0,0.18); border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:10px 10px; transition:border-color var(--dur-med) var(--ease-out);}
+.stat-mini b{display:block; font-family:var(--font-display); font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.stat-mini span{font-size:10px; color:var(--paper-faint); font-weight:600; text-transform:uppercase; letter-spacing:0.02em; display:block; line-height:1.25;}
 .stat-mini.credit b{color:var(--sage);}
 .stat-mini.debit b{color:var(--rust-bright);}
+.stat-mini.prev b{color:var(--paper-dim);}
 
 /* ---------- tabs ---------- */
 .tabs{
@@ -384,6 +385,17 @@ input[type=file]{display:none;}
 /* ---------- form (manual credit) ---------- */
 .field{margin-bottom:14px;}
 .field label{display:block; font-size:12px; font-weight:700; color:var(--paper-dim); margin-bottom:7px; text-transform:uppercase; letter-spacing:0.03em;}
+.field-label-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.field-label-row label{margin-bottom:7px;}
+.field-lock-btn{
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  width:24px; height:24px; margin-bottom:7px; padding:0; border-radius:50%; border:none; cursor:pointer;
+  background:transparent; color:var(--paper-faint);
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.field-lock-btn svg{width:14px; height:14px;}
+.field-lock-btn:active{transform:scale(0.88);}
+.field-lock-btn.locked{color:var(--amber); background:rgba(212,162,76,0.14);}
 .field input, .field select{
   width:100%; background:var(--ink-3); border:1px solid var(--line);
   border-radius:var(--radius-sm); padding:13px 14px; color:var(--paper);
@@ -673,6 +685,10 @@ input[type=file]{display:none;}
           <span class="saldo-unit">pcs</span>
         </div>
         <div class="summary-stats">
+          <div class="stat-mini prev">
+            <b id="statPrevSaldo">0</b>
+            <span>Saldo bulan lalu</span>
+          </div>
           <div class="stat-mini credit">
             <b id="statCredit">0</b>
             <span>Credit bulan ini</span>
@@ -695,7 +711,7 @@ input[type=file]{display:none;}
       <div class="panel active" id="panelImport">
         <div class="card">
           <h3 class="card-title">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Cek Fisik Keluar
           </h3>
           <p class="card-desc" id="importSubDesc">Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal dan setiap 1 unit SMH terpakai 2 pcs cek fisik.</p>
@@ -751,7 +767,12 @@ input[type=file]{display:none;}
             </div>
 
             <div class="field">
-              <label>Kode Faktur (bulan/tahun)</label>
+              <div class="field-label-row">
+                <label>Kode Faktur (bulan/tahun)</label>
+                <button class="field-lock-btn" id="btnLockFakturSuffix" type="button" title="Kunci kode faktur">
+                  <svg id="fakturLockIcon" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 017.5-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </button>
+              </div>
               <input type="text" id="quickFakturSuffix" placeholder="Contoh: PGR/VII/2026">
             </div>
 
