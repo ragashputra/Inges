@@ -1666,9 +1666,33 @@ function setupModalDrag() {
       return !!el.closest('input, textarea, select, button, .chip-opt');
     };
 
+    /**
+     * Cari elemen scrollable terdekat dari titik sentuh (termasuk daftar
+     * bertingkat seperti #sheetPickerList/#previewList/#riwayatList di
+     * dalam .modal-sheet). Kalau elemen scrollable itu punya konten yang
+     * melebihi tingginya sendiri (berarti benar-benar bisa di-scroll),
+     * gesture ini dianggap milik scroll konten — bukan drag-tutup modal.
+     * Ini termasuk sentuhan pertama dari posisi scrollTop 0, bukan cuma
+     * setelah sudah ter-scroll sebagian.
+     */
+    const isInsideScrollableList = (target) => {
+      let el = target;
+      while (el && el !== sheet.parentElement) {
+        if (el instanceof HTMLElement && el !== sheet) {
+          const style = getComputedStyle(el);
+          const isScrollable = (style.overflowY === 'auto' || style.overflowY === 'scroll');
+          if (isScrollable && el.scrollHeight > el.clientHeight + 1) {
+            return true;
+          }
+        }
+        el = el.parentElement;
+      }
+      return false;
+    };
+
     const start = (y, target) => {
-      if (sheet.scrollTop > 2) return false;      // sheet lagi di-scroll, jangan rebut gesture
       if (isBlockedTarget(target)) return false;   // hindari bentrok sama tap tombol/isi form
+      if (isInsideScrollableList(target)) return false; // sentuhan dimulai di daftar yang bisa di-scroll, biarkan scroll native jalan
       dragging = true;
       startY = y;
       deltaY = 0;
@@ -1678,6 +1702,15 @@ function setupModalDrag() {
     const move = (y) => {
       if (!dragging) return;
       const d = y - startY;
+      // Kalau user menggeser ke ATAS (deltaY negatif) itu berarti niatnya scroll
+      // isi ke bawah, bukan menutup — batalkan drag-tutup dan biarkan scroll normal jalan.
+      if (d < -4) {
+        dragging = false;
+        sheet.classList.remove('dragging');
+        sheet.style.transform = '';
+        deltaY = 0;
+        return;
+      }
       deltaY = d > 0 ? d : 0;
       sheet.style.transform = `translateY(${deltaY}px)`;
     };
