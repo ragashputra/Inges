@@ -6,7 +6,12 @@
 /* ---------------- CONFIG ---------------- */
 // TODO ganti dengan OAuth Client ID milikmu dari Google Cloud Console
 const GOOGLE_CLIENT_ID = '622950826437-nqrvo65q8csnjdvbmmd74jjng6uitbej.apps.googleusercontent.com';
-const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.send';
+
+/* ---------------- CEK FISIK (email permohonan) CONFIG ---------------- */
+const CF_TO_EMAIL = 'blanko_fin@cdn.co.id';
+const CF_DEFAULT_CC = ['lynda@cdn.co.id'];
+const PCS_PER_UNIT = 2; // 1 unit SMH = 2 lembar cek fisik
 
 const STORAGE_KEYS = {
   sheetId: 'inges_sheet_id',
@@ -48,6 +53,11 @@ const state = {
   pendingWriteMatches: null, // Map index entri -> nomor baris lama yang akan ditimpa (anti-duplikat)
   activeTab: 'import',
   sessionLog: [],
+
+  // ---- Cek Fisik (email permohonan) ----
+  cfCcList: [],        // [{email, locked}] - default CC dari CF_DEFAULT_CC selalu locked:true kecuali di-edit
+  cfMonthRows: [],      // [{id, bulanIdx(0-11), tahun, unit}]
+  cfMonthRowSeq: 0,
 };
 
 /* ---------------- DOM SHORTCUTS ---------------- */
@@ -2017,6 +2027,433 @@ function renderSessionLog() {
 /* =========================================================================
    MODALS
    ========================================================================= */
+/* =========================================================================
+   CEK FISIK — Permohonan Cek Fisik via Email
+   Form isi cepat -> template surat otomatis -> pratinjau -> kirim lewat
+   Gmail API (users.messages.send) pakai akun Google yang sedang login.
+   ========================================================================= */
+
+/** Nama bulan format "Januari", dst — dipakai di isi surat & subjek. */
+function bulanLongCapitalized(idx) {
+  const s = BULAN_ID_LONG[idx] || '';
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
+
+/** Format tanggal hari ini -> "20 Februari 2026" (dipakai di baris pembuka surat). */
+function formatTanggalSuratHariIni() {
+  const d = new Date();
+  return `${d.getDate()} ${bulanLongCapitalized(d.getMonth())} ${d.getFullYear()}`;
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * Render ulang seluruh blok Kepada/CC. "Kepada" selalu tetap & tidak bisa
+ * diubah. Setiap baris CC (termasuk default) punya tombol edit — begitu
+ * ditekan, baris berubah jadi input yang bisa langsung diketik ulang.
+ */
+function renderCfRecipients() {
+  const listEl = $('#cfCcList');
+  if (!listEl) return;
+  listEl.innerHTML = state.cfCcList.map((cc, i) => {
+    if (cc.editing) {
+      return `
+        <div class="cc-add-row" data-cc-idx="${i}">
+          <input type="email" class="cf-cc-edit-input" value="${escapeHtml(cc.email)}" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button type="button" class="cf-cc-edit-confirm" aria-label="Simpan">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>`;
+    }
+    return `
+      <div class="recipient-row" data-cc-idx="${i}">
+        <div class="recipient-row-icon cc">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="recipient-row-body">
+          <span class="recipient-row-label">CC</span>
+          <span class="recipient-row-email">${escapeHtml(cc.email)}</span>
+        </div>
+        <button type="button" class="recipient-edit-btn cf-cc-edit-btn" aria-label="Edit email">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button type="button" class="recipient-remove-btn cf-cc-remove-btn" aria-label="Hapus CC">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>`;
+  }).join('');
+}
+
+function cfAddCcAddress(email) {
+  const trimmed = (email || '').trim();
+  if (!trimmed) { toast('Isi alamat email dulu.', 'error', 2200); return false; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { toast('Format email tidak valid.', 'error', 2200); return false; }
+  if (state.cfCcList.some(c => c.email.toLowerCase() === trimmed.toLowerCase())) {
+    toast('Email itu sudah ada di daftar CC.', 'error', 2200);
+    return false;
+  }
+  state.cfCcList.push({ email: trimmed, editing: false });
+  renderCfRecipients();
+  return true;
+}
+
+function setupCfRecipients() {
+  // isi default CC (terkunci secara arti "tetap" — tapi tetap bisa diketuk edit sesuai permintaan)
+  state.cfCcList = CF_DEFAULT_CC.map(email => ({ email, editing: false }));
+  renderCfRecipients();
+
+  $('#cfBtnAddCc').addEventListener('click', () => {
+    const row = $('#cfCcAddRow');
+    row.classList.remove('hidden');
+    $('#cfCcNewInput').value = '';
+    $('#cfCcNewInput').focus();
+  });
+
+  $('#cfCcAddConfirm').addEventListener('click', () => {
+    const input = $('#cfCcNewInput');
+    if (cfAddCcAddress(input.value)) {
+      input.value = '';
+      $('#cfCcAddRow').classList.add('hidden');
+    }
+  });
+  $('#cfCcNewInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#cfCcAddConfirm').click(); }
+  });
+
+  // event delegation: tombol edit/hapus/simpan di tiap baris CC (baris dirender ulang tiap kali)
+  $('#cfCcList').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-cc-idx]');
+    if (!row) return;
+    const idx = parseInt(row.dataset.ccIdx, 10);
+    if (Number.isNaN(idx) || !state.cfCcList[idx]) return;
+
+    if (e.target.closest('.cf-cc-edit-btn')) {
+      state.cfCcList[idx].editing = true;
+      renderCfRecipients();
+      const editInput = $(`#cfCcList [data-cc-idx="${idx}"] .cf-cc-edit-input`);
+      if (editInput) { editInput.focus(); editInput.select(); }
+    } else if (e.target.closest('.cf-cc-remove-btn')) {
+      state.cfCcList.splice(idx, 1);
+      renderCfRecipients();
+    } else if (e.target.closest('.cf-cc-edit-confirm')) {
+      const editInput = $(`#cfCcList [data-cc-idx="${idx}"] .cf-cc-edit-input`);
+      const val = editInput ? editInput.value.trim() : '';
+      if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { toast('Format email tidak valid.', 'error', 2200); return; }
+      if (state.cfCcList.some((c, i) => i !== idx && c.email.toLowerCase() === val.toLowerCase())) {
+        toast('Email itu sudah ada di daftar CC.', 'error', 2200);
+        return;
+      }
+      state.cfCcList[idx].email = val;
+      state.cfCcList[idx].editing = false;
+      renderCfRecipients();
+    }
+  });
+  $('#cfCcList').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.classList.contains('cf-cc-edit-input')) {
+      e.preventDefault();
+      e.target.closest('[data-cc-idx]').querySelector('.cf-cc-edit-confirm').click();
+    }
+  });
+}
+
+/* ---------------- Rincian bulan (dinamis) ---------------- */
+function cfAddMonthRow(prefill) {
+  const now = new Date();
+  const row = {
+    id: ++state.cfMonthRowSeq,
+    bulanIdx: prefill?.bulanIdx ?? now.getMonth(),
+    tahun: prefill?.tahun ?? now.getFullYear(),
+    unit: prefill?.unit ?? '',
+  };
+  state.cfMonthRows.push(row);
+  renderCfMonthRows();
+}
+
+function cfRemoveMonthRow(id) {
+  state.cfMonthRows = state.cfMonthRows.filter(r => r.id !== id);
+  if (state.cfMonthRows.length === 0) cfAddMonthRow(); // selalu minimal 1 baris
+  else renderCfMonthRows();
+}
+
+function cfMonthOptionsHtml(selectedIdx) {
+  return BULAN_ID_LONG.map((b, i) =>
+    `<option value="${i}" ${i === selectedIdx ? 'selected' : ''}>${bulanLongCapitalized(i)}</option>`
+  ).join('');
+}
+
+function renderCfMonthRows() {
+  const listEl = $('#cfMonthList');
+  if (!listEl) return;
+  listEl.innerHTML = state.cfMonthRows.map((row, i) => {
+    const unitNum = parseInt(row.unit, 10) || 0;
+    const lembar = unitNum * PCS_PER_UNIT;
+    return `
+    <div class="month-entry" data-month-id="${row.id}">
+      <div class="month-entry-head">
+        <span class="month-entry-title">Baris ${i + 1}</span>
+        ${state.cfMonthRows.length > 1 ? `
+        <button type="button" class="month-entry-remove cf-month-remove" aria-label="Hapus baris">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>` : ''}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Pendaftaran Bulan</label>
+          <div class="select-wrap">
+            <select class="cf-month-bulan">${cfMonthOptionsHtml(row.bulanIdx)}</select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Tahun</label>
+          <input type="number" class="cf-month-tahun" value="${row.tahun}" inputmode="numeric" min="2020" max="2099">
+        </div>
+      </div>
+      <div class="field">
+        <label>Jumlah Unit</label>
+        <input type="number" class="cf-month-unit" placeholder="Contoh: 82" inputmode="numeric" min="1" value="${escapeHtml(row.unit)}">
+      </div>
+      <div class="month-entry-calc">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        ${unitNum > 0 ? `<span>${unitNum} Unit &times; ${PCS_PER_UNIT} lbr = <b>${lembar} Lembar</b> cek fisik</span>` : '<span>Isi jumlah unit untuk melihat total lembar</span>'}
+      </div>
+    </div>`;
+  }).join('');
+  cfUpdateTotalBanner();
+}
+
+function cfUpdateTotalBanner() {
+  const total = state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0);
+  const el = $('#cfTotalLembar');
+  if (el) el.innerHTML = `${total}<span>lembar</span>`;
+}
+
+function setupCfMonthRows() {
+  cfAddMonthRow();
+
+  $('#cfBtnAddMonth').addEventListener('click', () => cfAddMonthRow());
+
+  // event delegation: input & tombol hapus di tiap baris bulan (dirender ulang tiap kali)
+  $('#cfMonthList').addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('.cf-month-remove');
+    if (!removeBtn) return;
+    const entry = e.target.closest('[data-month-id]');
+    const id = parseInt(entry.dataset.monthId, 10);
+    cfRemoveMonthRow(id);
+  });
+
+  $('#cfMonthList').addEventListener('input', (e) => {
+    const entry = e.target.closest('[data-month-id]');
+    if (!entry) return;
+    const id = parseInt(entry.dataset.monthId, 10);
+    const row = state.cfMonthRows.find(r => r.id === id);
+    if (!row) return;
+
+    if (e.target.classList.contains('cf-month-unit')) {
+      // hanya angka
+      const digits = e.target.value.replace(/\D/g, '');
+      if (e.target.value !== digits) e.target.value = digits;
+      row.unit = digits;
+      // update kalkulasi baris ini tanpa render ulang semua (biar fokus input tidak hilang)
+      const calcEl = entry.querySelector('.month-entry-calc');
+      const unitNum = parseInt(digits, 10) || 0;
+      const lembar = unitNum * PCS_PER_UNIT;
+      calcEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${unitNum > 0 ? `<span>${unitNum} Unit &times; ${PCS_PER_UNIT} lbr = <b>${lembar} Lembar</b> cek fisik</span>` : '<span>Isi jumlah unit untuk melihat total lembar</span>'}`;
+      cfUpdateTotalBanner();
+    } else if (e.target.classList.contains('cf-month-tahun')) {
+      row.tahun = parseInt(e.target.value, 10) || row.tahun;
+    }
+  });
+
+  $('#cfMonthList').addEventListener('change', (e) => {
+    const entry = e.target.closest('[data-month-id]');
+    if (!entry) return;
+    const id = parseInt(entry.dataset.monthId, 10);
+    const row = state.cfMonthRows.find(r => r.id === id);
+    if (!row) return;
+    if (e.target.classList.contains('cf-month-bulan')) {
+      row.bulanIdx = parseInt(e.target.value, 10);
+    }
+  });
+}
+
+/** Render ulang page saat dibuka (nama SO/pengirim ikut isi terakhir yang tersimpan di form). */
+function renderCekFisikPage() {
+  // tidak ada fetch data — cukup pastikan minimal 1 baris bulan ada
+  if (state.cfMonthRows.length === 0) cfAddMonthRow();
+}
+
+/* ---------------- Bangun teks surat & subjek ---------------- */
+function cfBuildSubject() {
+  const kota = $('#cfKotaTujuan').value.trim() || '—';
+  const monthNames = [...new Set(state.cfMonthRows.map(r => bulanLongCapitalized(r.bulanIdx)))];
+  const bulanText = monthNames.length ? monthNames.join(' & ') : '—';
+  return `Permohonan Cek Fisik Pengurusan (${kota}) SO PGR Bulan (${bulanText})`;
+}
+
+function cfBuildBody() {
+  const namaSO = $('#cfNamaSO').value.trim() || '(Nama SO)';
+  const namaPengirim = $('#cfNamaPengirim').value.trim() || '(Nama Pengirim)';
+  const kota = $('#cfKotaTujuan').value.trim() || '(Kota Tujuan)';
+  const via = $('#cfVia').value.trim() || '(Via)';
+  const tanggal = formatTanggalSuratHariIni();
+  const totalLembar = state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0);
+
+  const rincianLines = state.cfMonthRows.map(r => {
+    const unitNum = parseInt(r.unit, 10) || 0;
+    const lembar = unitNum * PCS_PER_UNIT;
+    const bulanNama = bulanLongCapitalized(r.bulanIdx);
+    return `- Pendaftaran (${bulanNama} ${r.tahun}) sebanyak (${unitNum}) Unit dengan Total Cek Fisik = ${unitNum} Unit x ${PCS_PER_UNIT} lbr = ${lembar} Lembar cek fisik.`;
+  }).join('\n');
+
+  return `${namaSO}, ${tanggal}
+Kepada : MC Tax
+Head Office Medan
+
+Dengan hormat,
+Bersamaan dengan ini kami ajukan permohonan cek fisik untuk pengurusan surat-surat SMH ke (${kota}) Via (${via}) sebanyak ${totalLembar} Lembar cek fisik dengan rincian sebagai berikut :
+
+${rincianLines}
+
+Demikian dapat kami sampaikan, atas kerjasamanya kami ucapkan terima kasih, Salam Satu HATI
+${namaPengirim}
+${namaSO}`;
+}
+
+/* ---------------- Validasi form sebelum pratinjau ---------------- */
+function cfValidateForm() {
+  const errors = [];
+  if (!$('#cfNamaSO').value.trim()) errors.push('Nama SO belum diisi.');
+  if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
+  if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota tujuan belum diisi.');
+  if (!$('#cfVia').value.trim()) errors.push('Via belum diisi.');
+  if (state.cfMonthRows.length === 0) errors.push('Tambahkan minimal satu baris bulan.');
+  const hasValidUnit = state.cfMonthRows.some(r => (parseInt(r.unit, 10) || 0) > 0);
+  if (!hasValidUnit) errors.push('Isi jumlah unit di minimal satu baris bulan.');
+  if (state.cfCcList.some(c => !c.email)) errors.push('Ada alamat CC yang kosong.');
+  return errors;
+}
+
+function cfOpenPreview() {
+  const errors = cfValidateForm();
+  if (errors.length) {
+    toast(errors[0], 'error', 2800);
+    return;
+  }
+
+  const ccEmails = state.cfCcList.map(c => c.email);
+  $('#cfPrevTo').textContent = CF_TO_EMAIL;
+  if (ccEmails.length) {
+    $('#cfPrevCcRow').classList.remove('hidden');
+    $('#cfPrevCc').textContent = ccEmails.join(', ');
+  } else {
+    $('#cfPrevCcRow').classList.add('hidden');
+  }
+  $('#cfPrevSubject').textContent = cfBuildSubject();
+  $('#cfPrevBody').textContent = cfBuildBody();
+
+  openModal('#cfPreviewModal');
+}
+
+/* ---------------- Kirim via Gmail API ---------------- */
+/**
+ * Encode string UTF-8 ke base64url (dipakai buat header subjek RFC 2047
+ * dan buat raw message RFC 2822 yang dikirim ke Gmail API).
+ */
+function base64UrlEncodeUtf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Header subjek yang aman untuk karakter non-ASCII (encoded-word RFC 2047). */
+function encodeMimeSubject(subject) {
+  return `=?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
+}
+
+async function cfSendEmail() {
+  const btn = $('#cfBtnSend');
+  setButtonLoading(btn, true, 'Mengirim…');
+  try {
+    const toEmail = CF_TO_EMAIL;
+    const ccEmails = state.cfCcList.map(c => c.email);
+    const subject = cfBuildSubject();
+    const body = cfBuildBody();
+    const fromEmail = state.userEmail || '';
+
+    const mime = [
+      `From: ${fromEmail}`,
+      `To: ${toEmail}`,
+      ccEmails.length ? `Cc: ${ccEmails.join(', ')}` : null,
+      `Subject: ${encodeMimeSubject(subject)}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      body,
+    ].filter(Boolean).join('\r\n');
+
+    const raw = base64UrlEncodeUtf8(mime);
+
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${state.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ raw }),
+    });
+
+    if (!res.ok) {
+      let msg = 'Gagal mengirim email.';
+      try {
+        const errJson = await res.json();
+        if (res.status === 403 && /insufficient/i.test(JSON.stringify(errJson))) {
+          msg = 'Izin kirim email belum aktif di akun ini. Logout lalu masuk lagi untuk menyetujui izin baru.';
+        } else if (errJson?.error?.message) {
+          msg = errJson.error.message;
+        }
+      } catch (e) { /* biarkan pesan default */ }
+      throw new Error(msg);
+    }
+
+    closeModal('#cfPreviewModal');
+    toast('Email permohonan cek fisik berhasil dikirim.', 'success', 3600);
+    cfResetForm();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Gagal mengirim email.', 'error', 4200);
+  } finally {
+    setButtonLoading(btn, false, 'Kirim Email Sekarang');
+  }
+}
+
+/** Bersihkan form setelah email berhasil terkirim, siap dipakai untuk permohonan berikutnya. */
+function cfResetForm() {
+  $('#cfNamaSO').value = '';
+  $('#cfNamaPengirim').value = '';
+  $('#cfKotaTujuan').value = '';
+  $('#cfVia').value = '';
+  state.cfMonthRows = [];
+  cfAddMonthRow();
+  state.cfCcList = CF_DEFAULT_CC.map(email => ({ email, editing: false }));
+  renderCfRecipients();
+}
+
+function setupCekFisikPage() {
+  setupCfRecipients();
+  setupCfMonthRows();
+
+  $('#cfBtnPreview').addEventListener('click', cfOpenPreview);
+  $('#cfBtnPreviewBack').addEventListener('click', () => closeModal('#cfPreviewModal'));
+  $('#cfBtnSend').addEventListener('click', cfSendEmail);
+  $('#cfPreviewModal').addEventListener('click', (e) => {
+    if (e.target.id === 'cfPreviewModal') closeModal('#cfPreviewModal');
+  });
+}
+
 function openModal(sel) {
   const backdrop = $(sel);
   const sheet = backdrop.querySelector('.modal-sheet');
@@ -2238,8 +2675,8 @@ function setupTabs() {
 /* =========================================================================
    BOTTOM NAV — Beranda / Riwayat / Akun
    ========================================================================= */
-const NAV_ORDER = ['home', 'riwayat', 'akun'];
-const NAV_PAGE_IDS = { home: 'pageHome', riwayat: 'pageRiwayat', akun: 'pageAkun' };
+const NAV_ORDER = ['home', 'cekfisik', 'riwayat', 'akun'];
+const NAV_PAGE_IDS = { home: 'pageHome', cekfisik: 'pageCekFisik', riwayat: 'pageRiwayat', akun: 'pageAkun' };
 
 function setNavActive(navKey) {
   const idx = NAV_ORDER.indexOf(navKey);
@@ -2271,6 +2708,8 @@ function setupBottomNav() {
         renderSessionLog();
       } else if (nav === 'akun') {
         renderAkunPage();
+      } else if (nav === 'cekfisik') {
+        renderCekFisikPage();
       }
     });
   });
@@ -2338,6 +2777,7 @@ function init() {
   setupModals();
   setupCreateSheetModal();
   setupAkunPage();
+  setupCekFisikPage();
   setupModalDrag();
   setupModalCloseButtons();
   setupTabs();
