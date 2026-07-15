@@ -2041,10 +2041,13 @@ function bulanLongCapitalized(idx) {
   return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
-/** Format tanggal hari ini -> "20 Februari 2026" (dipakai di baris pembuka surat). */
+/** Tanggal hari ini -> "dd/mm/yyyy" (dipakai di baris pembuka surat, realtime saat pengajuan). */
 function formatTanggalSuratHariIni() {
   const d = new Date();
-  return `${d.getDate()} ${bulanLongCapitalized(d.getMonth())} ${d.getFullYear()}`;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 function escapeHtml(str) {
@@ -2367,9 +2370,13 @@ function renderCekFisikPage() {
 /* ---------------- Bangun teks surat & subjek ---------------- */
 function cfBuildSubject() {
   const kota = $('#cfKotaTujuan').value.trim() || '—';
+  // Gabungkan nama bulan (tanpa duplikat) lalu tempelkan tahun dari baris
+  // terakhir yang diisi -- kalau lebih dari satu bulan, digabung dengan " & "
+  // (mis. "Juni & Juli 2026").
   const monthNames = [...new Set(state.cfMonthRows.map(r => bulanLongCapitalized(r.bulanIdx)))];
-  const bulanText = monthNames.length ? monthNames.join(' & ') : '—';
-  return `Permohonan Cek Fisik Pengurusan (${kota}) SO PGR Bulan (${bulanText})`;
+  const lastTahun = state.cfMonthRows.length ? state.cfMonthRows[state.cfMonthRows.length - 1].tahun : new Date().getFullYear();
+  const periodeText = monthNames.length ? `${monthNames.join(' & ')} ${lastTahun}` : '—';
+  return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
 function cfBuildBody() {
@@ -2461,7 +2468,11 @@ async function cfSendEmail() {
     const toEmail = state.cfToEmail;
     const ccEmails = state.cfCcList.map(c => c.email);
     const subject = cfBuildSubject();
-    const body = cfBuildBody();
+    // RFC 2822 mewajibkan CRLF sebagai pemisah baris. Body dibangun dengan
+    // template literal JS (cuma "\n"), jadi harus dinormalisasi ke "\r\n"
+    // dulu -- kalau tidak, sebagian mail client (termasuk Gmail) bisa salah
+    // parsing baris paling awal body dan membuatnya seolah hilang.
+    const body = cfBuildBody().replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
     const fromEmail = state.userEmail || '';
 
     const mime = [
