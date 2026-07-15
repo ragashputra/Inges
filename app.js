@@ -110,6 +110,10 @@ function toast(message, type = 'success', duration = 3400) {
    ========================================================================= */
 let DEFAULT_GATE_TEXT = '';
 let DEFAULT_SIGNIN_LABEL = 'Masuk dengan Google';
+let DEFAULT_DZ_TITLE = 'Ketuk untuk pilih file CSV';
+let DEFAULT_DZ_SUB = 'atau tarik & lepas di sini';
+let DEFAULT_CONFIRM_BTN_LABEL = 'Tulis Sekarang';
+let DEFAULT_LOCK_STATUS_TEXT = 'Mengikuti bulan berjalan otomatis';
 
 /* =========================================================================
    GOOGLE OAUTH (GIS token client)
@@ -380,7 +384,7 @@ function refreshSheetLockUI() {
   if (sheetName) sheetName.textContent = state.activeSheetName || 'Belum ada sheet aktif';
   const statusText = $('#lockStatusText');
   if (statusText) {
-    statusText.textContent = locked ? 'Terkunci — tidak ikut pindah otomatis' : 'Mengikuti bulan berjalan otomatis';
+    statusText.textContent = locked ? 'Terkunci — tidak ikut pindah otomatis' : DEFAULT_LOCK_STATUS_TEXT;
     statusText.classList.toggle('locked', locked);
   }
   const btnUnlock = $('#btnUnlockSheet');
@@ -997,15 +1001,15 @@ function setupImportSubTabs() {
   const subManual = $('#subImportManual');
   const desc = $('#importSubDesc');
 
-  const descCsv = 'Upload listing penjualan untuk mencatat pemakaian cek fisik. Inges mengelompokkan otomatis per tanggal dan setiap 1 unit SMH terpakai 2 pcs cek fisik.';
-  const descManual = 'Input langsung kalau ada penjualan hari ini dan belum sempat export CSV. Cukup isi tanggal, jumlah unit, dan nomor faktur awal — Inges menghitung sisanya.';
-
+  // Teks deskripsi diambil dari atribut data-desc di HTML (bukan hardcode di
+  // JS) — supaya kalau kamu edit teksnya di index.html, langsung ikut
+  // berubah tanpa perlu sentuh app.js sama sekali.
   chipCsv.addEventListener('click', () => {
     chipCsv.classList.add('active');
     chipManual.classList.remove('active');
     subCsv.classList.remove('hidden');
     subManual.classList.add('hidden');
-    desc.textContent = descCsv;
+    desc.textContent = chipCsv.dataset.desc || '';
   });
 
   chipManual.addEventListener('click', () => {
@@ -1013,8 +1017,13 @@ function setupImportSubTabs() {
     chipCsv.classList.remove('active');
     subManual.classList.remove('hidden');
     subCsv.classList.add('hidden');
-    desc.textContent = descManual;
+    desc.textContent = chipManual.dataset.desc || '';
   });
+
+  // Sinkronkan teks deskripsi dengan chip yang aktif saat halaman pertama
+  // dimuat, biar HTML (paragraf awal) dan data-desc chip aktif selalu match.
+  const initiallyActive = chipManual.classList.contains('active') ? chipManual : chipCsv;
+  if (initiallyActive.dataset.desc) desc.textContent = initiallyActive.dataset.desc;
 }
 
 function setupQuickEntry() {
@@ -1284,7 +1293,7 @@ async function confirmAndUploadImport() {
     <div class="confirm-row"><span>Total debit cek fisik</span><span>-${totalDebit} pcs</span></div>
     <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() - totalDebit)} pcs</span></div>
   `;
-  $('#confirmBtnLabel').textContent = 'Tulis Sekarang';
+  $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
   openModal('#confirmModal');
 
   $('#btnConfirmWrite').onclick = () => executeImportWrite();
@@ -1498,8 +1507,8 @@ function resetImportPanel() {
   $('#btnUpload').classList.add('hidden');
   $('#btnUpload').disabled = true;
   $('#dropzone').classList.remove('has-file');
-  $('#dzTitle').textContent = 'Ketuk untuk pilih file CSV';
-  $('#dzSub').textContent = 'atau tarik & lepas di sini';
+  $('#dzTitle').textContent = DEFAULT_DZ_TITLE;
+  $('#dzSub').textContent = DEFAULT_DZ_SUB;
   $('#dzFilename').classList.add('hidden');
   $('#swipeStrip').classList.add('hidden');
   $('#swipeFill').style.width = '0%';
@@ -1566,7 +1575,7 @@ function confirmManualSubmit() {
     <div class="confirm-row"><span>Credit</span><span>+${formatNum(credit)} pcs</span></div>
     <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() + credit)} pcs</span></div>
   `;
-  $('#confirmBtnLabel').textContent = 'Tulis Sekarang';
+  $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
   openModal('#confirmModal');
   $('#btnConfirmWrite').onclick = () => executeManualWrite(dateObj, faktur, credit);
 }
@@ -1983,8 +1992,16 @@ function init() {
   // yang mungkin menimpanya — supaya teks di index.html selalu jadi sumber kebenaran.
   const gateTextEl = $('#gateText');
   const btnSignInLabelEl = $('#btnSignInLabel');
+  const dzTitleEl = $('#dzTitle');
+  const dzSubEl = $('#dzSub');
+  const confirmBtnLabelEl = $('#confirmBtnLabel');
+  const lockStatusTextEl = $('#lockStatusText');
   if (gateTextEl && gateTextEl.textContent.trim()) DEFAULT_GATE_TEXT = gateTextEl.textContent.trim();
   if (btnSignInLabelEl && btnSignInLabelEl.textContent.trim()) DEFAULT_SIGNIN_LABEL = btnSignInLabelEl.textContent.trim();
+  if (dzTitleEl && dzTitleEl.textContent.trim()) DEFAULT_DZ_TITLE = dzTitleEl.textContent.trim();
+  if (dzSubEl && dzSubEl.textContent.trim()) DEFAULT_DZ_SUB = dzSubEl.textContent.trim();
+  if (confirmBtnLabelEl && confirmBtnLabelEl.textContent.trim()) DEFAULT_CONFIRM_BTN_LABEL = confirmBtnLabelEl.textContent.trim();
+  if (lockStatusTextEl && lockStatusTextEl.textContent.trim()) DEFAULT_LOCK_STATUS_TEXT = lockStatusTextEl.textContent.trim();
 
   $('#btnSignIn').addEventListener('click', requestSignIn);
   setupDropzone();
