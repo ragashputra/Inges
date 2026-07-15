@@ -230,8 +230,29 @@ async function afterSignIn() {
     state.spreadsheetId = savedSheetId;
     await loadActiveSheetContext();
   } else {
-    openModal('#setupModal');
+    openSetupModal();
   }
+}
+
+/**
+ * Buka modal hubungkan/ganti spreadsheet. Kalau sudah ada spreadsheet yang
+ * tersimpan & sedang dipakai, tampilkan info banner biar user tahu link
+ * itu sudah tercatat (bukan cuma diam-diam menimpa tanpa konfirmasi visual).
+ */
+function openSetupModal() {
+  const info = $('#setupCurrentInfo');
+  const idText = $('#setupCurrentIdText');
+  if (state.spreadsheetId) {
+    if (idText) {
+      idText.textContent = state.activeSheetName
+        ? `ID: ${state.spreadsheetId} · Sheet aktif: ${state.activeSheetName}`
+        : `ID: ${state.spreadsheetId}`;
+    }
+    if (info) info.classList.remove('hidden');
+  } else if (info) {
+    info.classList.add('hidden');
+  }
+  openModal('#setupModal');
 }
 
 /**
@@ -319,7 +340,7 @@ function refreshSheetLockUI() {
 
 function setupAkunPage() {
   $('#btnChangeSheet').addEventListener('click', () => {
-    openModal('#setupModal');
+    openSetupModal();
   });
 
   $('#btnPickSheet').addEventListener('click', openSheetPicker);
@@ -1824,12 +1845,12 @@ function setupThemeToggle() {
     const current = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     const next = current === 'light' ? 'dark' : 'light';
     root.setAttribute('data-theme', next);
-    btn.setAttribute('aria-pressed', next === 'light' ? 'true' : 'false');
+    btn.setAttribute('aria-checked', next === 'light' ? 'true' : 'false');
     const mc = document.getElementById('metaThemeColor');
     if (mc) mc.setAttribute('content', next === 'light' ? '#F4F2EC' : '#0B0F0D');
     try { localStorage.setItem('inges_theme', next); } catch (e) { /* non-fatal */ }
   });
-  btn.setAttribute('aria-pressed', document.documentElement.getAttribute('data-theme') === 'light' ? 'true' : 'false');
+  btn.setAttribute('aria-checked', document.documentElement.getAttribute('data-theme') === 'light' ? 'true' : 'false');
 }
 
 /* =========================================================================
@@ -1865,8 +1886,8 @@ function init() {
   setupThemeToggle();
   setupImportSheetSelect();
 
-  const monthPill = $('#monthPill');
-  if (monthPill) monthPill.addEventListener('click', openSheetPicker);
+  const btnSwitchSheet = $('#btnSwitchSheet');
+  if (btnSwitchSheet) btnSwitchSheet.addEventListener('click', openSheetPicker);
 
   $('#btnUpload').addEventListener('click', confirmAndUploadImport);
 

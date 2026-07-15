@@ -182,21 +182,32 @@ input,select,textarea{font-family:inherit;}
 
 .topbar-actions{display:flex; align-items:center; gap:8px;}
 .theme-toggle{
-  width:34px; height:34px; border-radius:50%; flex-shrink:0;
-  display:flex; align-items:center; justify-content:center;
+  width:50px; height:26px; border-radius:var(--radius-full); flex-shrink:0;
+  position:relative; box-sizing:border-box; padding:0;
   background:var(--glass-bg); border:1px solid var(--glass-border);
   backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-  color:var(--paper-dim); cursor:pointer; position:relative; overflow:hidden;
-  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out), transform var(--dur-fast) var(--ease-spring);
+  cursor:pointer;
+  transition:background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
 }
-.theme-toggle:active{transform:scale(0.88);}
+.theme-toggle-knob{
+  position:absolute; top:50%; left:3px;
+  width:20px; height:20px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--ink-1); border:1px solid var(--line);
+  box-shadow:0 1px 3px rgba(0,0,0,0.3);
+  transform:translateY(-50%) translateX(0);
+  transition:transform var(--dur-med) var(--ease-spring), background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
+}
+[data-theme="light"] .theme-toggle-knob{transform:translateY(-50%) translateX(24px);}
+.theme-toggle:active .theme-toggle-knob{transform:translateY(-50%) translateX(0) scale(0.88);}
+[data-theme="light"] .theme-toggle:active .theme-toggle-knob{transform:translateY(-50%) translateX(24px) scale(0.88);}
 .tt-icon{
-  position:absolute; width:17px; height:17px;
+  position:absolute; width:13px; height:13px; color:var(--paper-dim);
   transition:opacity var(--dur-med) var(--ease-spring), transform var(--dur-med) var(--ease-spring);
 }
 .tt-sun{opacity:0; transform:rotate(-90deg) scale(0.4);}
 .tt-moon{opacity:1; transform:rotate(0deg) scale(1);}
-[data-theme="light"] .tt-sun{opacity:1; transform:rotate(0deg) scale(1);}
+[data-theme="light"] .tt-sun{opacity:1; transform:rotate(0deg) scale(1); color:var(--amber);}
 [data-theme="light"] .tt-moon{opacity:0; transform:rotate(90deg) scale(0.4);}
 
 /* ---------- scroll area ---------- */
@@ -254,16 +265,25 @@ input,select,textarea{font-family:inherit;}
 }
 .summary-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
 .summary-label{font-size:11.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--paper-faint); font-weight:700;}
+.month-control{display:flex; align-items:center; gap:6px;}
 .month-pill{
-  display:flex; align-items:center; gap:5px; border:none; cursor:pointer;
+  display:flex; align-items:center; gap:5px;
   font-size:11.5px; font-weight:700; color:var(--sage); font-family:inherit;
   background:rgba(163,184,153,0.12); border:1px solid rgba(163,184,153,0.25);
   padding:5px 11px; border-radius:var(--radius-full);
   transition:all var(--dur-fast) var(--ease-out);
+  cursor:default; -webkit-user-select:none; user-select:none;
 }
-.month-pill:active{transform:scale(0.94);}
 .month-pill svg{width:11px; height:11px; flex-shrink:0;}
 .month-pill.locked{color:var(--amber); background:rgba(212,162,76,0.12); border-color:rgba(212,162,76,0.3);}
+.month-switch-btn{
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  width:24px; height:24px; padding:0; border-radius:50%; border:none; cursor:pointer;
+  background:rgba(163,184,153,0.1); color:var(--sage);
+  transition:all var(--dur-fast) var(--ease-out);
+}
+.month-switch-btn svg{width:12px; height:12px;}
+.month-switch-btn:active{transform:scale(0.88); background:rgba(163,184,153,0.2);}
 .saldo-row{display:flex; align-items:baseline; gap:8px;}
 .saldo-num{font-family:var(--font-display); font-size:44px; font-weight:700; letter-spacing:-0.02em; transition:color var(--dur-med) var(--ease-out);}
 .saldo-num.neg{color:var(--rust-bright);}
@@ -597,6 +617,16 @@ input[type=file]{display:none;}
 .modal-title{font-family:var(--font-display); font-size:18px; font-weight:700; margin:0 0 6px;}
 .modal-sub{font-size:12.5px; color:var(--paper-faint); margin:0 0 18px; line-height:1.5;}
 
+.setup-current-info{
+  display:flex; align-items:flex-start; gap:10px;
+  background:rgba(163,184,153,0.1); border:1px solid rgba(163,184,153,0.25);
+  border-radius:var(--radius-md); padding:12px 14px; margin:-6px 0 16px;
+}
+.setup-current-info svg{width:18px; height:18px; color:var(--sage); flex-shrink:0; margin-top:1px;}
+.setup-current-info-text{display:flex; flex-direction:column; gap:3px; min-width:0;}
+.setup-current-info-text b{font-size:12.5px; font-weight:700; color:var(--sage); line-height:1.3;}
+.setup-current-info-text span{font-size:11.5px; color:var(--paper-faint); word-break:break-all; font-weight:600; line-height:1.4;}
+
 .acct-modal-head{display:flex; align-items:center; gap:12px; margin-bottom:22px;}
 .acct-modal-head img{width:48px; height:48px; border-radius:50%; border:1px solid var(--line); flex-shrink:0;}
 .acct-modal-fallback{
@@ -704,9 +734,11 @@ input[type=file]{display:none;}
       </div>
     </div>
     <div class="topbar-actions">
-      <button class="theme-toggle" id="themeToggle" aria-label="Ganti tema terang/gelap" aria-pressed="false">
-        <svg class="tt-icon tt-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <svg class="tt-icon tt-moon" viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8.5 8.5 0 1110.5 4a6.7 6.7 0 009.5 10.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      <button class="theme-toggle" id="themeToggle" type="button" role="switch" aria-checked="false" aria-label="Ganti tema terang/gelap">
+        <span class="theme-toggle-knob">
+          <svg class="tt-icon tt-sun" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="tt-icon tt-moon" viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8.5 8.5 0 1110.5 4a6.7 6.7 0 009.5 10.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </span>
       </button>
       <div id="acctArea"></div>
     </div>
@@ -739,7 +771,12 @@ input[type=file]{display:none;}
       <div class="summary fade-in">
         <div class="summary-top">
           <span class="summary-label">Saldo Cek Fisik Saat Ini</span>
-          <button class="month-pill" id="monthPill" type="button">—</button>
+          <div class="month-control">
+            <span class="month-pill" id="monthPill">—</span>
+            <button class="month-switch-btn" id="btnSwitchSheet" type="button" title="Pilih sheet bulan lain" aria-label="Pilih sheet bulan lain">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
         </div>
         <div class="saldo-row">
           <span class="saldo-num" id="saldoNum">—</span>
@@ -1028,10 +1065,17 @@ input[type=file]{display:none;}
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <h3 class="modal-title">Hubungkan Spreadsheet</h3>
-    <p class="modal-sub">Tempel ID spreadsheet Rekap Cek Fisik. ID ada di URL: docs.google.com/spreadsheets/d/<b>ID-nya-di-sini</b>/edit</p>
+    <p class="modal-sub">Tempel link atau ID spreadsheet Rekap Cek Fisik. Link ada di address bar saat spreadsheet dibuka: docs.google.com/spreadsheets/d/<b>ID-nya-di-sini</b>/edit</p>
+    <div class="setup-current-info hidden" id="setupCurrentInfo">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="setup-current-info-text">
+        <b>Link ini sudah tersimpan &amp; sedang dipakai</b>
+        <span id="setupCurrentIdText">—</span>
+      </div>
+    </div>
     <div class="field">
-      <label>Spreadsheet ID</label>
-      <input type="text" id="setupSheetId" placeholder="1ScmxyYlMuJroAmsIidTuCH9sm1U0N1ZRCO5kHOGZRhE">
+      <label>Link Spreadsheet</label>
+      <input type="text" id="setupSheetId" placeholder="Isi dengan link Google Drive Cek Fisik Anda">
     </div>
     <button class="btn-primary" id="btnSetupSave">
       <span>Simpan &amp; Lanjutkan</span>
