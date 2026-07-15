@@ -2370,12 +2370,31 @@ function renderCekFisikPage() {
 /* ---------------- Bangun teks surat & subjek ---------------- */
 function cfBuildSubject() {
   const kota = $('#cfKotaTujuan').value.trim() || '—';
-  // Gabungkan nama bulan (tanpa duplikat) lalu tempelkan tahun dari baris
-  // terakhir yang diisi -- kalau lebih dari satu bulan, digabung dengan " & "
-  // (mis. "Juni & Juli 2026").
-  const monthNames = [...new Set(state.cfMonthRows.map(r => bulanLongCapitalized(r.bulanIdx)))];
-  const lastTahun = state.cfMonthRows.length ? state.cfMonthRows[state.cfMonthRows.length - 1].tahun : new Date().getFullYear();
-  const periodeText = monthNames.length ? `${monthNames.join(' & ')} ${lastTahun}` : '—';
+
+  // Urutkan baris bulan secara KRONOLOGIS (tahun lalu bulan) dulu -- bukan
+  // ikut urutan baris diisi di form -- baru digabung jadi teks periode.
+  // 1 bulan  -> "Juli 2026"
+  // 2 bulan  -> "Juli & Agustus 2026"
+  // 3+ bulan -> "Juni, Juli & Agustus 2026"
+  const sortedRows = [...state.cfMonthRows].sort((a, b) => (a.tahun - b.tahun) || (a.bulanIdx - b.bulanIdx));
+
+  const seen = new Set();
+  const monthNames = [];
+  sortedRows.forEach(r => {
+    const name = bulanLongCapitalized(r.bulanIdx);
+    if (!seen.has(name)) { seen.add(name); monthNames.push(name); }
+  });
+
+  const lastTahun = sortedRows.length ? sortedRows[sortedRows.length - 1].tahun : new Date().getFullYear();
+
+  let periodeMonths = '—';
+  if (monthNames.length === 1) {
+    periodeMonths = monthNames[0];
+  } else if (monthNames.length > 1) {
+    periodeMonths = `${monthNames.slice(0, -1).join(', ')} & ${monthNames[monthNames.length - 1]}`;
+  }
+
+  const periodeText = monthNames.length ? `${periodeMonths} ${lastTahun}` : '—';
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
@@ -2475,17 +2494,26 @@ async function cfSendEmail() {
     const body = cfBuildBody().replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
     const fromEmail = state.userEmail || '';
 
-    const mime = [
+    // PENTING: header & body harus digabung terpisah. Sebelumnya semua baris
+    // (termasuk '' penanda baris kosong wajib RFC 2822 antara header & body)
+    // digabung jadi satu array lalu di-.filter(Boolean) -- niatnya cuma buang
+    // baris Cc kalau null, tapi '' ikut kebuang juga (karena '' itu falsy di
+    // JS). Akibatnya baris kosong pemisah header/body hilang, jadi body nempel
+    // ke header terakhir dan Gmail salah parsing -- bagian atas isi email
+    // keliatan "kepotong" walau di pratinjau (yang tidak lewat MIME) aman-aman
+    // saja. Fix: filter null HANYA di array header, baris kosong pemisah
+    // ditambahkan manual sesudahnya, bukan ikut di-filter.
+    const headerLines = [
       `From: ${fromEmail}`,
       `To: ${toEmail}`,
       ccEmails.length ? `Cc: ${ccEmails.join(', ')}` : null,
       `Subject: ${encodeMimeSubject(subject)}`,
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset="UTF-8"',
-      'Content-Transfer-Encoding: 7bit',
-      '',
-      body,
-    ].filter(Boolean).join('\r\n');
+      'Content-Transfer-Encoding: 8bit',
+    ].filter(Boolean);
+
+    const mime = headerLines.join('\r\n') + '\r\n\r\n' + body;
 
     const raw = base64UrlEncodeUtf8(mime);
 
