@@ -396,6 +396,43 @@ input[type=file]{display:none;}
 .field-lock-btn svg{width:14px; height:14px;}
 .field-lock-btn:active{transform:scale(0.88);}
 .field-lock-btn.locked{color:var(--amber); background:rgba(212,162,76,0.14);}
+.field-lock-btn.shake{animation:lockShake 0.42s var(--ease-out);}
+@keyframes lockShake{
+  0%,100%{transform:translateX(0);}
+  20%{transform:translateX(-3px);}
+  40%{transform:translateX(3px);}
+  60%{transform:translateX(-2px);}
+  80%{transform:translateX(2px);}
+}
+
+/* ---------- lock status badge (Otomatis / Terkunci) ---------- */
+.lock-control{display:flex; align-items:center; gap:7px; margin-bottom:7px;}
+.lock-badge{
+  display:flex; align-items:center; gap:5px;
+  font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
+  padding:4px 10px 4px 8px; border-radius:var(--radius-full);
+  background:rgba(163,184,153,0.12); color:var(--sage); border:1px solid rgba(163,184,153,0.25);
+  transition:all var(--dur-fast) var(--ease-out); white-space:nowrap;
+}
+.lock-badge-dot{width:6px; height:6px; border-radius:50%; background:var(--sage); flex-shrink:0; transition:all var(--dur-fast) var(--ease-out);}
+.lock-badge.locked{background:rgba(212,162,76,0.15); color:var(--amber); border-color:rgba(212,162,76,0.35);}
+.lock-badge.locked .lock-badge-dot{background:var(--amber); box-shadow:0 0 0 3px rgba(212,162,76,0.2);}
+
+/* ---------- input dengan status terkunci (Kode Faktur) ---------- */
+.locked-input-wrap{position:relative;}
+.locked-input-wrap .input-lock-icon{
+  position:absolute; right:14px; top:50%; transform:translateY(-50%) scale(0.6);
+  width:16px; height:16px; color:var(--amber); pointer-events:none;
+  opacity:0; transition:opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-spring);
+}
+.locked-input-wrap .input-lock-icon.show{opacity:1; transform:translateY(-50%) scale(1);}
+.field input.is-locked{
+  background:rgba(212,162,76,0.07); border-color:rgba(212,162,76,0.3);
+  color:var(--amber); cursor:not-allowed; padding-right:40px;
+}
+.field input.is-locked:focus{border-color:rgba(212,162,76,0.45); background:rgba(212,162,76,0.09);}
+.field-hint{font-size:11.5px; color:var(--paper-faint); margin:7px 2px 0; line-height:1.4; transition:color var(--dur-fast) var(--ease-out);}
+.field-hint.locked{color:var(--amber);}
 .field input, .field select{
   width:100%; background:var(--ink-3); border:1px solid var(--line);
   border-radius:var(--radius-sm); padding:13px 14px; color:var(--paper);
@@ -770,11 +807,21 @@ input[type=file]{display:none;}
             <div class="field">
               <div class="field-label-row">
                 <label>Kode Faktur (bulan/tahun)</label>
-                <button class="field-lock-btn" id="btnLockFakturSuffix" type="button" title="Kunci kode faktur">
-                  <svg id="fakturLockIcon" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 017.5-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                </button>
+                <div class="lock-control">
+                  <span class="lock-badge" id="fakturLockBadge">
+                    <span class="lock-badge-dot"></span>
+                    <span id="fakturLockBadgeText">Otomatis</span>
+                  </span>
+                  <button class="field-lock-btn" id="btnLockFakturSuffix" type="button" title="Kunci kode faktur">
+                    <svg id="fakturLockIcon" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 017.5-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
               </div>
-              <input type="text" id="quickFakturSuffix" placeholder="Contoh: PGR/VII/2026">
+              <div class="locked-input-wrap">
+                <input type="text" id="quickFakturSuffix" placeholder="Contoh: PGR/VII/2026">
+                <svg class="input-lock-icon" id="fakturInputLockIcon" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </div>
+              <p class="field-hint" id="fakturLockHint">Ikut bulan &amp; tahun berjalan otomatis. Klik gembok buat mengunci.</p>
             </div>
 
             <div class="quick-preview-box hidden" id="quickPreviewBox">

@@ -925,6 +925,10 @@ function setupQuickEntry() {
   const btnAdd = $('#btnQuickAdd');
   const btnLock = $('#btnLockFakturSuffix');
   const lockIcon = $('#fakturLockIcon');
+  const lockBadge = $('#fakturLockBadge');
+  const lockBadgeText = $('#fakturLockBadgeText');
+  const lockHint = $('#fakturLockHint');
+  const inputLockIcon = $('#fakturInputLockIcon');
 
   const iconLocked = '<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
   const iconUnlocked = '<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 017.5-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
@@ -937,7 +941,23 @@ function setupQuickEntry() {
   const refreshLockUI = () => {
     btnLock.classList.toggle('locked', suffixLocked);
     lockIcon.innerHTML = suffixLocked ? iconLocked : iconUnlocked;
-    btnLock.title = suffixLocked ? 'Kode faktur terkunci — klik buat lepas' : 'Kunci kode faktur biar nggak berubah saat reload';
+    btnLock.title = suffixLocked ? 'Kode faktur terkunci — klik buat lepas & edit lagi' : 'Kunci kode faktur biar nggak berubah saat reload';
+
+    // kolom kode faktur sendiri jadi tidak bisa diketik selama terkunci —
+    // satu-satunya cara edit adalah lepas kunci dulu lewat tombol gembok.
+    suffixEl.readOnly = suffixLocked;
+    suffixEl.classList.toggle('is-locked', suffixLocked);
+    suffixEl.setAttribute('aria-readonly', String(suffixLocked));
+
+    if (lockBadge) lockBadge.classList.toggle('locked', suffixLocked);
+    if (lockBadgeText) lockBadgeText.textContent = suffixLocked ? 'Terkunci' : 'Otomatis';
+    if (inputLockIcon) inputLockIcon.classList.toggle('show', suffixLocked);
+    if (lockHint) {
+      lockHint.textContent = suffixLocked
+        ? 'Terkunci — kode ini dipakai terus walau reload. Klik gembok buat edit.'
+        : 'Ikut bulan & tahun berjalan otomatis. Klik gembok buat mengunci.';
+      lockHint.classList.toggle('locked', suffixLocked);
+    }
   };
 
   // default: tanggal hari ini. Kode faktur pakai yang dikunci kalau ada,
@@ -965,6 +985,17 @@ function setupQuickEntry() {
   fakturStartEl.addEventListener('input', () => {
     const cleaned = fakturStartEl.value.replace(/\D/g, '').slice(0, 4);
     if (cleaned !== fakturStartEl.value) fakturStartEl.value = cleaned;
+  });
+
+  // kalau kode faktur lagi terkunci, tetap kasih tahu kenapa nggak bisa
+  // diketik alih-alih diem aja seolah rusak — dorong perhatian ke tombol gembok.
+  suffixEl.addEventListener('focus', () => {
+    if (suffixLocked) {
+      suffixEl.blur();
+      toast('Kode faktur terkunci. Klik ikon gembok buat membuka & mengedit.', 'success', 2600);
+      btnLock.classList.add('shake');
+      setTimeout(() => btnLock.classList.remove('shake'), 420);
+    }
   });
 
   const revalidate = () => {
