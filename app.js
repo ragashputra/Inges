@@ -1791,7 +1791,11 @@ async function executeManualWrite(dateObj, faktur, credit) {
       const range = `'${state.activeSheetName}'!B${matchedRow}:E${matchedRow}`;
       await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
-        body: JSON.stringify({ range, values: [[formatTanggalForSheet(dateObj), faktur, credit, '']] }),
+        // Debit WAJIB angka 0 (bukan string kosong) — rumus Saldo pakai
+        // IF(ISBLANK(E...)) untuk deteksi baris "belum diisi"; kalau Debit
+        // dikosongkan, rumus itu mengira baris ini belum lengkap dan
+        // outputnya jadi blank, bukan angka saldo yang benar.
+        body: JSON.stringify({ range, values: [[formatTanggalForSheet(dateObj), faktur, credit, 0]] }),
       });
       toast(`Baris lama ditimpa dengan credit ${formatNum(credit)} pcs`, 'success');
       logSession('manual', `+${formatNum(credit)} pcs (${faktur}) — menimpa baris ${matchedRow}`);
@@ -1802,7 +1806,7 @@ async function executeManualWrite(dateObj, faktur, credit) {
         formatTanggalForSheet(dateObj),
         faktur,
         credit,
-        '',
+        0, // Debit WAJIB 0 (angka), bukan string kosong — lihat catatan di atas soal ISBLANK(E...)
         buildSaldoFormula(rowNum, prevRowNum),
       ]];
       const range = `'${state.activeSheetName}'!B${rowNum}:F${rowNum}`;
