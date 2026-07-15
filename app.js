@@ -9,7 +9,7 @@ const GOOGLE_CLIENT_ID = '622950826437-nqrvo65q8csnjdvbmmd74jjng6uitbej.apps.goo
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.send';
 
 /* ---------------- CEK FISIK (email permohonan) CONFIG ---------------- */
-const CF_TO_EMAIL = 'blanko_fin@cdn.co.id';
+const CF_TO_EMAIL_DEFAULT = 'blanko_fin@cdn.co.id';
 const CF_DEFAULT_CC = ['lynda@cdn.co.id'];
 const PCS_PER_UNIT = 2; // 1 unit SMH = 2 lembar cek fisik
 
@@ -55,7 +55,9 @@ const state = {
   sessionLog: [],
 
   // ---- Cek Fisik (email permohonan) ----
-  cfCcList: [],        // [{email, locked}] - default CC dari CF_DEFAULT_CC selalu locked:true kecuali di-edit
+  cfToEmail: CF_TO_EMAIL_DEFAULT,
+  cfToEditing: false,
+  cfCcList: [],        // [{email, editing}] - default CC dari CF_DEFAULT_CC
   cfMonthRows: [],      // [{id, bulanIdx(0-11), tahun, unit}]
   cfMonthRowSeq: 0,
 };
@@ -2050,6 +2052,65 @@ function escapeHtml(str) {
 }
 
 /**
+ * Render baris "Kepada" — mirip CC, punya mode tampil & mode edit, tapi
+ * selalu tepat 1 alamat (bukan daftar). Default terisi CF_TO_EMAIL_DEFAULT,
+ * user bisa ketuk pensil untuk menggantinya.
+ */
+function renderCfToRow() {
+  const el = $('#cfToRow');
+  if (!el) return;
+  if (state.cfToEditing) {
+    el.innerHTML = `
+      <div class="cc-add-row" id="cfToEditRow">
+        <input type="email" id="cfToEditInput" value="${escapeHtml(state.cfToEmail)}" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="button" id="cfToEditConfirm" aria-label="Simpan">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="recipient-row">
+        <div class="recipient-row-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="recipient-row-body">
+          <span class="recipient-row-label">Kepada</span>
+          <span class="recipient-row-email">${escapeHtml(state.cfToEmail)}</span>
+        </div>
+        <button type="button" class="recipient-edit-btn" id="cfToEditBtn" aria-label="Edit email">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>`;
+  }
+}
+
+function setupCfToRow() {
+  renderCfToRow();
+
+  $('#cfToRow').addEventListener('click', (e) => {
+    if (e.target.closest('#cfToEditBtn')) {
+      state.cfToEditing = true;
+      renderCfToRow();
+      const input = $('#cfToEditInput');
+      if (input) { input.focus(); input.select(); }
+    } else if (e.target.closest('#cfToEditConfirm')) {
+      const input = $('#cfToEditInput');
+      const val = input ? input.value.trim() : '';
+      if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { toast('Format email tidak valid.', 'error', 2200); return; }
+      state.cfToEmail = val;
+      state.cfToEditing = false;
+      renderCfToRow();
+    }
+  });
+  $('#cfToRow').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.id === 'cfToEditInput') {
+      e.preventDefault();
+      $('#cfToEditConfirm').click();
+    }
+  });
+}
+
+/**
  * Render ulang seluruh blok Kepada/CC. "Kepada" selalu tetap & tidak bisa
  * diubah. Setiap baris CC (termasuk default) punya tombol edit — begitu
  * ditekan, baris berubah jadi input yang bisa langsung diketik ulang.
@@ -2278,6 +2339,25 @@ function setupCfMonthRows() {
   });
 }
 
+/**
+ * Paksa isian jadi HURUF KAPITAL otomatis sambil diketik, sambil menjaga
+ * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
+ */
+function setupCfUppercaseFields() {
+  ['cfNamaSO', 'cfNamaPengirim'].forEach(id => {
+    const input = $('#' + id);
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const pos = input.selectionStart;
+      const upper = input.value.toUpperCase();
+      if (input.value !== upper) {
+        input.value = upper;
+        if (pos !== null) input.setSelectionRange(pos, pos);
+      }
+    });
+  });
+}
+
 /** Render ulang page saat dibuka (nama SO/pengirim ikut isi terakhir yang tersimpan di form). */
 function renderCekFisikPage() {
   // tidak ada fetch data — cukup pastikan minimal 1 baris bulan ada
@@ -2293,10 +2373,10 @@ function cfBuildSubject() {
 }
 
 function cfBuildBody() {
-  const namaSO = $('#cfNamaSO').value.trim() || '(Nama SO)';
-  const namaPengirim = $('#cfNamaPengirim').value.trim() || '(Nama Pengirim)';
-  const kota = $('#cfKotaTujuan').value.trim() || '(Kota Tujuan)';
-  const via = $('#cfVia').value.trim() || '(Via)';
+  const namaSO = $('#cfNamaSO').value.trim() || 'NAMA SO';
+  const namaPengirim = $('#cfNamaPengirim').value.trim() || 'NAMA PENGIRIM';
+  const kota = $('#cfKotaTujuan').value.trim() || 'Kota Tujuan';
+  const via = $('#cfVia').value.trim() || 'Via';
   const tanggal = formatTanggalSuratHariIni();
   const totalLembar = state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0);
 
@@ -2304,7 +2384,7 @@ function cfBuildBody() {
     const unitNum = parseInt(r.unit, 10) || 0;
     const lembar = unitNum * PCS_PER_UNIT;
     const bulanNama = bulanLongCapitalized(r.bulanIdx);
-    return `- Pendaftaran (${bulanNama} ${r.tahun}) sebanyak (${unitNum}) Unit dengan Total Cek Fisik = ${unitNum} Unit x ${PCS_PER_UNIT} lbr = ${lembar} Lembar cek fisik.`;
+    return `- Pendaftaran ${bulanNama} ${r.tahun} sebanyak ${unitNum} Unit dengan Total Cek Fisik = ${unitNum} Unit x ${PCS_PER_UNIT} lbr = ${lembar} Lembar cek fisik.`;
   }).join('\n');
 
   return `${namaSO}, ${tanggal}
@@ -2312,7 +2392,7 @@ Kepada : MC Tax
 Head Office Medan
 
 Dengan hormat,
-Bersamaan dengan ini kami ajukan permohonan cek fisik untuk pengurusan surat-surat SMH ke (${kota}) Via (${via}) sebanyak ${totalLembar} Lembar cek fisik dengan rincian sebagai berikut :
+Bersamaan dengan ini kami ajukan permohonan cek fisik untuk pengurusan surat-surat SMH ke ${kota} Via ${via} sebanyak ${totalLembar} Lembar cek fisik dengan rincian sebagai berikut :
 
 ${rincianLines}
 
@@ -2324,6 +2404,7 @@ ${namaSO}`;
 /* ---------------- Validasi form sebelum pratinjau ---------------- */
 function cfValidateForm() {
   const errors = [];
+  if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
   if (!$('#cfNamaSO').value.trim()) errors.push('Nama SO belum diisi.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
   if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota tujuan belum diisi.');
@@ -2343,7 +2424,7 @@ function cfOpenPreview() {
   }
 
   const ccEmails = state.cfCcList.map(c => c.email);
-  $('#cfPrevTo').textContent = CF_TO_EMAIL;
+  $('#cfPrevTo').textContent = state.cfToEmail;
   if (ccEmails.length) {
     $('#cfPrevCcRow').classList.remove('hidden');
     $('#cfPrevCc').textContent = ccEmails.join(', ');
@@ -2377,7 +2458,7 @@ async function cfSendEmail() {
   const btn = $('#cfBtnSend');
   setButtonLoading(btn, true, 'Mengirim…');
   try {
-    const toEmail = CF_TO_EMAIL;
+    const toEmail = state.cfToEmail;
     const ccEmails = state.cfCcList.map(c => c.email);
     const subject = cfBuildSubject();
     const body = cfBuildBody();
@@ -2438,13 +2519,18 @@ function cfResetForm() {
   $('#cfVia').value = '';
   state.cfMonthRows = [];
   cfAddMonthRow();
+  state.cfToEmail = CF_TO_EMAIL_DEFAULT;
+  state.cfToEditing = false;
+  renderCfToRow();
   state.cfCcList = CF_DEFAULT_CC.map(email => ({ email, editing: false }));
   renderCfRecipients();
 }
 
 function setupCekFisikPage() {
+  setupCfToRow();
   setupCfRecipients();
   setupCfMonthRows();
+  setupCfUppercaseFields();
 
   $('#cfBtnPreview').addEventListener('click', cfOpenPreview);
   $('#cfBtnPreviewBack').addEventListener('click', () => closeModal('#cfPreviewModal'));
