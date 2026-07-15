@@ -2031,7 +2031,23 @@ function init() {
   initGoogleAuth();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // Paksa cek versi sw.js terbaru tiap kali app dibuka — jangan nunggu
+      // jadwal cek otomatis browser (bisa berjam-jam/berhari-hari), supaya
+      // service worker versi baru (dan strategi cache-nya) langsung kepakai.
+      reg.update().catch(() => {});
+    }).catch(() => {});
+
+    // Kalau service worker baru sudah ambil alih kontrol (activate + skipWaiting),
+    // reload sekali biar halaman yang sedang terbuka langsung pakai versi baru —
+    // bukan nunggu user manual tutup-buka PWA. Guard sessionStorage biar tidak
+    // reload berkali-kali kalau event ini terpicu lebih dari sekali.
+    let swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (swReloaded) return;
+      swReloaded = true;
+      window.location.reload();
+    });
   }
 }
 
