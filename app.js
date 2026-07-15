@@ -1701,41 +1701,146 @@ function resetImportPanel() {
    ========================================================================= */
 let selectedSource = 'SP-DRI';
 
+// Sumber yang formatnya DIBANGUN OTOMATIS dari 3 digit nomor SP + tanggal —
+// user cukup isi angkanya saja. "CUSTOM" (Lainnya) tetap teks bebas.
+const STRUCTURED_SP_SOURCES = ['SP-DRI', 'SP-CF', 'SP-BIRO'];
+
+function isStructuredSource(src) {
+  return STRUCTURED_SP_SOURCES.includes(src);
+}
+
+/** Nol-kan angka SP jadi selalu 3 digit ("7" -> "007", "22" -> "022"). */
+function pad3(n) {
+  return String(n).padStart(3, '0');
+}
+
+/**
+ * Bangun referensi SP lengkap dari 3 digit nomor yang diisi user + sumber
+ * yang dipilih + tanggal SP (dipakai untuk bulan-romawi & tahun 2 digit).
+ * Mengikuti format historis tiap sumber:
+ *   SP-DRI  -> 122/SP-DRI/VII/26   (pakai bulan romawi)
+ *   SP-BIRO -> 122/SP-BIRO/VII/26  (sama seperti SP-DRI)
+ *   SP-CF   -> 122/SP-CF/26        (tanpa bulan romawi, sesuai pola lama)
+ * Return null untuk sumber CUSTOM (referensi bebas, bukan format otomatis).
+ */
+function buildSPReference(source, numStr, dateObj) {
+  if (!isStructuredSource(source)) return null;
+  const digits = String(numStr || '').replace(/\D/g, '');
+  if (digits.length !== 3) return null;
+  const d = dateObj instanceof Date && !isNaN(dateObj) ? dateObj : new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const roman = toRomanMonth(d.getMonth() + 1);
+  if (source === 'SP-CF') return `${digits}/SP-CF/${yy}`;
+  if (source === 'SP-BIRO') return `${digits}/SP-BIRO/${roman}/${yy}`;
+  return `${digits}/SP-DRI/${roman}/${yy}`;
+}
+
 function setupManualForm() {
+  const fakturEl = $('#manualFaktur');
+  const dateEl = $('#manualDate');
+
   $$('#sourceChips .chip-opt').forEach(chip => {
     chip.addEventListener('click', () => {
       $$('#sourceChips .chip-opt').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       selectedSource = chip.dataset.src;
+      fakturEl.value = ''; // ganti sumber -> mulai input baru, jangan campur format lama
       updateManualFakturPlaceholder();
+      validateManualForm();
     });
   });
 
   $('#manualDate').value = todayLocalISO();
 
-  [$('#manualFaktur'), $('#manualCredit'), $('#manualDate')].forEach(el => {
+  fakturEl.addEventListener('input', () => {
+    if (isStructuredSource(selectedSource)) {
+      // Wajib angka & maksimal 3 digit — sisanya (kode sumber, bulan romawi,
+      // tahun) dibangun otomatis, user tidak perlu ketik itu lagi.
+      const digitsOnly = fakturEl.value.replace(/\D/g, '').slice(0, 3);
+      if (fakturEl.value !== digitsOnly) fakturEl.value = digitsOnly;
+    } else {
+      // Sumber "Lainnya" (referensi bebas) -> wajib kapital biar seragam
+      // dengan format SP-DRI/SP-CF/SP-BIRO yang semuanya huruf besar.
+      const pos = fakturEl.selectionStart;
+      const upper = fakturEl.value.toUpperCase();
+      if (fakturEl.value !== upper) {
+        fakturEl.value = upper;
+        if (pos !== null) fakturEl.setSelectionRange(pos, pos);
+      }
+    }
+    validateManualForm();
+  });
+
+  [$('#manualCredit'), dateEl].forEach(el => {
     el.addEventListener('input', validateManualForm);
   });
 
+  updateManualFakturPlaceholder();
   $('#btnManualSubmit').addEventListener('click', confirmManualSubmit);
 }
 
 function updateManualFakturPlaceholder() {
   const field = $('#manualFaktur');
-  if (selectedSource === 'SP-DRI') field.placeholder = 'Contoh: 0122/SP-DRI/V/25';
-  else if (selectedSource === 'SP-CF') field.placeholder = 'Contoh: 64/SP-CF/25';
-  else field.placeholder = 'Nomor referensi bebas';
+  const label = $('#manualFakturLabel');
+  const structured = isStructuredSource(selectedSource);
+
+  if (structured) {
+    label.textContent = `No. ${selectedSource} (3 digit)`;
+    field.placeholder = '122';
+    field.setAttribute('inputmode', 'numeric');
+    field.setAttribute('maxlength', '3');
+    field.setAttribute('pattern', '[0-9]{3}');
+  } else {
+    label.textContent = 'Nomor Faktur / Referensi';
+    field.placeholder = 'Contoh: SP-LAIN/122/2026';
+    field.removeAttribute('maxlength');
+    field.removeAttribute('pattern');
+    field.removeAttribute('inputmode');
+  }
+  refreshManualFakturPreview();
+}
+
+/** Tampilkan pratinjau referensi lengkap yang akan ditulis (khusus sumber terstruktur). */
+function refreshManualFakturPreview() {
+  const box = $('#manualFakturPreviewBox');
+  const previewEl = $('#manualFakturPreview');
+  if (!box || !previewEl) return;
+
+  if (!isStructuredSource(selectedSource)) {
+    box.classList.add('hidden');
+    return;
+  }
+
+  const dateStr = $('#manualDate').value;
+  const dateObj = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  const built = buildSPReference(selectedSource, $('#manualFaktur').value, dateObj);
+
+  if (built) {
+    previewEl.textContent = built;
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
+  }
+}
+
+/** Nilai final yang akan ditulis ke sheet — dibangun otomatis untuk sumber terstruktur, teks apa adanya untuk "Lainnya". */
+function getManualFakturValue() {
+  if (!isStructuredSource(selectedSource)) return $('#manualFaktur').value.trim();
+  const dateStr = $('#manualDate').value;
+  const dateObj = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  return buildSPReference(selectedSource, $('#manualFaktur').value, dateObj);
 }
 
 function validateManualForm() {
-  const faktur = $('#manualFaktur').value.trim();
+  refreshManualFakturPreview();
+  const faktur = getManualFakturValue();
   const credit = parseFloat($('#manualCredit').value);
   const date = $('#manualDate').value;
   $('#btnManualSubmit').disabled = !(faktur && credit > 0 && date);
 }
 
 async function confirmManualSubmit() {
-  const faktur = $('#manualFaktur').value.trim();
+  const faktur = getManualFakturValue();
   const credit = parseFloat($('#manualCredit').value);
   const dateStr = $('#manualDate').value;
   const dateObj = new Date(dateStr + 'T00:00:00');

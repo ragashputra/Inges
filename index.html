@@ -956,13 +956,21 @@ input[type=file]{display:none;}
             <div class="chip-select" id="sourceChips">
               <div class="chip-opt active" data-src="SP-DRI">SP-DRI</div>
               <div class="chip-opt" data-src="SP-CF">SP-CF</div>
+              <div class="chip-opt" data-src="SP-BIRO">SP-BIRO</div>
               <div class="chip-opt" data-src="CUSTOM">Lainnya</div>
             </div>
           </div>
 
           <div class="field" id="manualFakturField">
-            <label>Nomor Faktur / Referensi</label>
-            <input type="text" id="manualFaktur" placeholder="Contoh: 0122/SP-DRI/V/25">
+            <label id="manualFakturLabel">No. SP-DRI (3 digit)</label>
+            <input type="text" id="manualFaktur" inputmode="numeric" maxlength="3" pattern="[0-9]{3}" placeholder="122">
+          </div>
+
+          <div class="quick-preview-box hidden" id="manualFakturPreviewBox">
+            <div class="quick-preview-row">
+              <span>Referensi lengkap</span>
+              <b id="manualFakturPreview">—</b>
+            </div>
           </div>
 
           <div class="field">
