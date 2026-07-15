@@ -1647,11 +1647,40 @@ function closeModal(sel) {
   $(sel).classList.remove('show');
 }
 
+/**
+ * Sama seperti closeModal, tapi menghormati aturan modal yang wajib
+ * diselesaikan dulu sebelum bisa ditutup (mis. setupModal sebelum
+ * spreadsheet terhubung). Dipakai oleh drag-to-dismiss DAN tombol
+ * silang, supaya perilakunya konsisten di kedua cara menutup.
+ */
+function closeModalGuarded(id) {
+  if (id === 'setupModal' && !state.spreadsheetId) {
+    toast('Hubungkan spreadsheet dulu sebelum melanjutkan.', 'error', 2500);
+    return;
+  }
+  closeModal(`#${id}`);
+}
+
 /* =========================================================================
    DRAG-TO-DISMISS (semua .modal-sheet)
    Bisa ditarik turun dari handle atau dari area sheet yang sedang tidak
    di-scroll, buat nutup modal atau geser modal yang tampilannya kepotong.
    ========================================================================= */
+/**
+ * Tombol silang di pojok setiap modal — cara eksplisit menutup modal
+ * untuk pengguna yang belum terbiasa dengan gestur drag-turun. Satu
+ * listener di document (event delegation) menangani semua modal
+ * sekaligus, dan tetap menghormati closeModalGuarded (mis. setupModal
+ * tidak bisa ditutup sebelum spreadsheet terhubung).
+ */
+function setupModalCloseButtons() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.modal-close-btn');
+    if (!btn) return;
+    closeModalGuarded(btn.dataset.closeModal);
+  });
+}
+
 function setupModalDrag() {
   $$('.modal-backdrop').forEach(backdrop => {
     const sheet = backdrop.querySelector('.modal-sheet');
@@ -1723,9 +1752,7 @@ function setupModalDrag() {
       sheet.style.transform = '';
       deltaY = 0;
       if (shouldClose) {
-        // modal setup awal (belum ada spreadsheet) wajib diisi dulu, tidak bisa di-drag tutup
-        if (backdrop.id === 'setupModal' && !state.spreadsheetId) return;
-        closeModal(`#${backdrop.id}`);
+        closeModalGuarded(backdrop.id);
       }
     };
 
@@ -1914,6 +1941,7 @@ function init() {
   setupCreateSheetModal();
   setupAkunPage();
   setupModalDrag();
+  setupModalCloseButtons();
   setupTabs();
   setupBottomNav();
   setupThemeToggle();

@@ -609,9 +609,19 @@ input[type=file]{display:none;}
   transition:transform var(--dur-slow) var(--ease-spring), background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
   max-height:min(85vh, calc(100dvh - var(--safe-top) - 24px));
   overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y;
+  position:relative;
 }
 .modal-backdrop.show .modal-sheet{transform:translateY(0);}
 .modal-sheet.dragging{transition:none;}
+.modal-close-btn{
+  position:sticky; float:right; top:2px; margin:-2px -6px 0 0;
+  width:32px; height:32px; border-radius:50%; border:none;
+  background:var(--ink-3); color:var(--paper-dim);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition:all var(--dur-fast) var(--ease-out); z-index:2;
+}
+.modal-close-btn svg{width:16px; height:16px;}
+.modal-close-btn:active{transform:scale(0.9); background:var(--ink-2); color:var(--paper);}
 .modal-handle{width:38px; height:4px; border-radius:2px; background:var(--line); margin:8px auto 16px; position:relative; cursor:grab;}
 .modal-handle::after{content:''; position:absolute; left:50%; top:50%; width:64px; height:28px; transform:translate(-50%,-50%);}
 .modal-title{font-family:var(--font-display); font-size:18px; font-weight:700; margin:0 0 6px;}
@@ -1049,6 +1059,7 @@ input[type=file]{display:none;}
 <!-- ============ MODAL: CONFIRM UPLOAD ============ -->
 <div class="modal-backdrop" id="confirmModal">
   <div class="modal-sheet">
+    <button class="modal-close-btn" data-close-modal="confirmModal" aria-label="Tutup"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <div class="modal-handle"></div>
     <h3 class="modal-title">Konfirmasi Penulisan</h3>
     <p class="modal-sub">Data berikut akan ditulis ke sheet <b id="confirmSheetName">—</b>. Periksa sekali lagi sebelum lanjut.</p>
@@ -1063,6 +1074,7 @@ input[type=file]{display:none;}
 <!-- ============ MODAL: SPREADSHEET SETUP ============ -->
 <div class="modal-backdrop" id="setupModal">
   <div class="modal-sheet">
+    <button class="modal-close-btn" data-close-modal="setupModal" aria-label="Tutup"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <div class="modal-handle"></div>
     <h3 class="modal-title">Hubungkan Spreadsheet</h3>
     <p class="modal-sub">Tempel link atau ID spreadsheet Rekap Cek Fisik. Link ada di address bar saat spreadsheet dibuka: docs.google.com/spreadsheets/d/<b>ID-nya-di-sini</b>/edit</p>
@@ -1086,6 +1098,7 @@ input[type=file]{display:none;}
 <!-- ============ MODAL: PILIH SHEET BULAN ============ -->
 <div class="modal-backdrop" id="sheetPickerModal">
   <div class="modal-sheet">
+    <button class="modal-close-btn" data-close-modal="sheetPickerModal" aria-label="Tutup"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <div class="modal-handle"></div>
     <h3 class="modal-title">Pilih Sheet Bulan</h3>
     <p class="modal-sub">Sheet yang dipilih akan terkunci — Inges tetap memakainya walau di-reload atau ditutup, sampai kamu ganti lagi atau lepas kunci dari halaman Akun.</p>
@@ -1105,6 +1118,7 @@ input[type=file]{display:none;}
 <!-- ============ MODAL: BUAT SHEET BARU ============ -->
 <div class="modal-backdrop" id="createSheetModal">
   <div class="modal-sheet">
+    <button class="modal-close-btn" data-close-modal="createSheetModal" aria-label="Tutup"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <div class="modal-handle"></div>
     <h3 class="modal-title">Buat Sheet Bulan Baru</h3>
     <p class="modal-sub">Sheet baru disalin otomatis dari struktur sheet <b id="createSheetBasedOn">—</b> — header, format, dan rumus ikut tersalin. Saldo awal langsung diisi dari saldo akhir sheet itu.</p>
