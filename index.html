@@ -191,16 +191,16 @@ input,select,textarea{font-family:inherit;}
 }
 .theme-toggle-knob{
   position:absolute; top:50%; left:3px;
-  width:20px; height:20px; border-radius:50%;
+  width:20px; height:20px; border-radius:50%; box-sizing:border-box;
   display:flex; align-items:center; justify-content:center;
   background:var(--ink-1); border:1px solid var(--line);
   box-shadow:0 1px 3px rgba(0,0,0,0.3);
   transform:translateY(-50%) translateX(0);
   transition:transform var(--dur-med) var(--ease-spring), background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
 }
-[data-theme="light"] .theme-toggle-knob{transform:translateY(-50%) translateX(24px);}
+[data-theme="light"] .theme-toggle-knob{transform:translateY(-50%) translateX(22px);}
 .theme-toggle:active .theme-toggle-knob{transform:translateY(-50%) translateX(0) scale(0.88);}
-[data-theme="light"] .theme-toggle:active .theme-toggle-knob{transform:translateY(-50%) translateX(24px) scale(0.88);}
+[data-theme="light"] .theme-toggle:active .theme-toggle-knob{transform:translateY(-50%) translateX(22px) scale(0.88);}
 .tt-icon{
   position:absolute; width:13px; height:13px; color:var(--paper-dim);
   transition:opacity var(--dur-med) var(--ease-spring), transform var(--dur-med) var(--ease-spring);
