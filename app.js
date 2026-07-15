@@ -29,6 +29,7 @@ const state = {
   accessToken: null,
   tokenClient: null,
   userWantsSignIn: false,    // true kalau user sendiri yang klik tombol login (buat tahu kapan boleh tampilkan toast error)
+  isReconnecting: false,     // true kalau gate sedang tampil dalam mode "Sambungkan Lagi" (sesi lama expired), bukan login pertama kali
   userEmail: null,
   userPicture: null,
   spreadsheetId: null,
@@ -114,8 +115,6 @@ function initGoogleAuth() {
     callback: onTokenReceived,
     error_callback: (err) => {
       console.error('OAuth error', err);
-      // kalau ini percobaan restore sesi diam-diam (bukan klik manual user),
-      // jangan tampilkan error — cukup balik ke layar login biasa tanpa drama.
       if (state.userWantsSignIn) {
         toast('Gagal masuk. Coba lagi.', 'error');
       }
@@ -132,19 +131,54 @@ function initGoogleAuth() {
     state.accessToken = savedToken;
     afterSignIn();
   } else if (hadSession) {
-    // token sudah kedaluwarsa tapi user pernah login sebelumnya (dan belum logout manual)
-    // -> coba sambung ulang otomatis di belakang layar, tanpa memaksa user klik login lagi.
-    state.userWantsSignIn = false;
-    showAuthRestoring();
-    state.tokenClient.requestAccessToken({ prompt: '' });
+    // Token sudah kedaluwarsa (umur token Google memang dibatasi ~1 jam,
+    // ini aturan Google dan tidak bisa diperpanjang dari sisi aplikasi manapun).
+    //
+    // Percobaan silent-refresh otomatis (requestAccessToken tanpa klik user
+    // langsung) TIDAK dipakai di sini karena tidak stabil — banyak browser
+    // (Edge/Safari dengan proteksi pelacakan, atau kalau cookie pihak-ketiga
+    // diblokir) diam-diam menggagalkannya tanpa pesan jelas, yang justru
+    // terasa seperti "logout sendiri" ke pengguna.
+    //
+    // Sebagai gantinya: tampilkan layar "Sambungkan Lagi" dengan SATU tombol.
+    // Karena ini klik langsung dari pengguna, Google mengizinkannya secara
+    // konsisten di semua browser, dan biasanya melewati pemilihan akun
+    // (langsung pakai akun terakhir) karena sesi Google di browser masih ada.
+    showReconnectPrompt();
   } else {
     showSignInGate();
   }
 }
 
 /**
+ * Layar "sesi berakhir" dengan satu tombol sambung-ulang. Dipakai sebagai
+ * pengganti silent-refresh otomatis yang tidak stabil lintas browser —
+ * satu tap ini adalah gestur langsung dari pengguna, jadi selalu diizinkan
+ * oleh Google (tidak kena popup-blocker), dan biasanya tidak perlu pilih
+ * akun ulang karena sesi Google di browser masih diingat.
+ */
+function showReconnectPrompt() {
+  const text = $('#gateText');
+  const btn = $('#btnSignIn');
+  const btnLabel = $('#btnSignInLabel');
+  const foot = $('#gateFoot');
+  const spinner = $('#gateSpinner');
+  if (text) text.textContent = 'Sesi kamu sudah berakhir (ini wajar, token Google otomatis kedaluwarsa tiap beberapa jam demi keamanan). Sambungkan lagi — biasanya tidak perlu pilih akun ulang.';
+  if (spinner) spinner.classList.add('hidden');
+  if (btn) btn.classList.remove('hidden');
+  if (btnLabel) btnLabel.textContent = 'Sambungkan Lagi';
+  if (foot) foot.classList.remove('hidden');
+  $('#gate').classList.remove('hidden');
+  $('#mainContent').classList.add('hidden');
+  $('#bottomnav').classList.add('hidden');
+  state.isReconnecting = true;
+}
+
+/**
  * Tampilkan layar gate dalam mode "menyambungkan sesi" (spinner, tanpa
- * tombol login) selagi Inges mencoba me-refresh token secara diam-diam.
+ * tombol login) — dipakai HANYA sesaat setelah pengguna sendiri menekan
+ * tombol Sambungkan Lagi/Masuk, sebagai umpan balik visual singkat
+ * sebelum popup Google muncul. Bukan untuk percobaan diam-diam.
  */
 function showAuthRestoring() {
   const text = $('#gateText');
@@ -162,18 +196,21 @@ function showAuthRestoring() {
 
 /**
  * Kembalikan layar gate ke tampilan login normal (dipakai kalau restore
- * sesi diam-diam gagal, atau memang belum pernah login sama sekali).
+ * sesi gagal, atau memang belum pernah login sama sekali).
  */
 function showSignInGate() {
   const text = $('#gateText');
   const spinner = $('#gateSpinner');
   const btn = $('#btnSignIn');
+  const btnLabel = $('#btnSignInLabel');
   const foot = $('#gateFoot');
   if (text) text.textContent = 'Rekap cek fisik dari listing penjualan langsung ke Google Sheets. Masuk dengan akun Google untuk mulai.';
   if (spinner) spinner.classList.add('hidden');
   if (btn) btn.classList.remove('hidden');
+  if (btnLabel) btnLabel.textContent = 'Masuk dengan Google';
   if (foot) foot.classList.remove('hidden');
   $('#gate').classList.remove('hidden');
+  state.isReconnecting = false;
 }
 
 function onTokenReceived(resp) {
@@ -197,6 +234,7 @@ function requestSignIn() {
     return;
   }
   state.userWantsSignIn = true;
+  if (state.isReconnecting) showAuthRestoring();
   state.tokenClient.requestAccessToken({ prompt: '' });
 }
 
