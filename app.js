@@ -1786,7 +1786,7 @@ function updateManualFakturPlaceholder() {
 
   if (structured) {
     label.textContent = `No. ${selectedSource} (3 digit)`;
-    field.placeholder = '122';
+    field.placeholder = 'Contoh: 012';
     field.setAttribute('inputmode', 'numeric');
     field.setAttribute('maxlength', '3');
     field.setAttribute('pattern', '[0-9]{3}');
