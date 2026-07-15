@@ -599,8 +599,13 @@ input[type=file]{display:none;}
 
 .acct-modal-head{display:flex; align-items:center; gap:12px; margin-bottom:22px;}
 .acct-modal-head img{width:48px; height:48px; border-radius:50%; border:1px solid var(--line); flex-shrink:0;}
-.acct-modal-dot{width:48px; height:48px; border-radius:50%; background:var(--ink-3); display:flex; align-items:center; justify-content:center; flex-shrink:0;}
-.acct-modal-dot::after{content:''; width:11px; height:11px; border-radius:50%; background:var(--sage); box-shadow:0 0 0 4px rgba(163,184,153,0.15);}
+.acct-modal-fallback{
+  width:48px; height:48px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(155deg, var(--forest-bright), var(--forest) 60%, #24422f);
+  box-shadow:0 3px 10px rgba(61,107,74,0.32), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.acct-modal-fallback span{font-family:var(--font-display); font-weight:700; font-size:19px; color:#fff; line-height:1;}
 .acct-modal-info{display:flex; flex-direction:column; gap:4px; min-width:0;}
 .acct-modal-info b{font-size:15px; font-weight:700; font-family:var(--font-display); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .acct-modal-info span{font-size:11.5px; color:var(--paper-faint); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -952,9 +957,9 @@ input[type=file]{display:none;}
         <div class="card">
           <div class="acct-modal-head">
             <img id="acctPagePic" src="" alt="" class="hidden">
-            <div class="acct-modal-dot hidden" id="acctPageDot"></div>
+            <div class="acct-modal-fallback hidden" id="acctPageDot"><span id="acctPageInitial">–</span></div>
             <div class="acct-modal-info">
-              <b id="acctPageEmail">—</b>
+              <b id="acctPageEmail">Memuat akun…</b>
               <span id="acctPageSheetLabel">—</span>
             </div>
           </div>

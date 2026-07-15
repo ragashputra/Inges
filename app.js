@@ -217,6 +217,12 @@ async function afterSignIn() {
     }
   } catch (e) { /* non-fatal */ }
 
+  // render halaman Akun sekarang juga (bukan cuma pas user klik tab Akun),
+  // jadi begitu dibuka datanya udah siap — nggak ada jeda nampilin placeholder kosong.
+  // Dipanggil di luar try/catch di atas supaya tetap jalan dengan fallback yang wajar
+  // (avatar inisial + teks "Akun Google") sekalipun fetch profil gagal.
+  renderAkunPage();
+
   state.lockedSheetName = localStorage.getItem(STORAGE_KEYS.lockedSheet) || null;
 
   const savedSheetId = localStorage.getItem(STORAGE_KEYS.sheetId);
@@ -271,14 +277,17 @@ function renderAkunPage() {
     : 'Spreadsheet belum terhubung';
 
   const pic = $('#acctPagePic');
-  const dot = $('#acctPageDot');
+  const fallback = $('#acctPageDot');
+  const initialEl = $('#acctPageInitial');
   if (state.userPicture) {
     pic.src = state.userPicture;
     pic.classList.remove('hidden');
-    dot.classList.add('hidden');
+    fallback.classList.add('hidden');
   } else {
     pic.classList.add('hidden');
-    dot.classList.remove('hidden');
+    fallback.classList.remove('hidden');
+    // avatar cadangan: huruf pertama email, biar nggak pernah tampil kosong/blank
+    if (initialEl) initialEl.textContent = (state.userEmail || 'A').charAt(0).toUpperCase();
   }
   refreshSheetLockUI();
 }
