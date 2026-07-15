@@ -389,8 +389,8 @@ input[type=file]{display:none;}
 .field-label-row label{margin-bottom:7px;}
 .field-lock-btn{
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
-  width:24px; height:24px; margin-bottom:7px; padding:0; border-radius:50%; border:none; cursor:pointer;
-  background:transparent; color:var(--paper-faint);
+  width:24px; height:24px; padding:0; border-radius:50%; border:none; cursor:pointer;
+  background:transparent; color:var(--paper-faint); box-sizing:border-box;
   transition:all var(--dur-fast) var(--ease-out);
 }
 .field-lock-btn svg{width:14px; height:14px;}
@@ -409,8 +409,9 @@ input[type=file]{display:none;}
 .lock-control{display:flex; align-items:center; gap:7px; margin-bottom:7px;}
 .lock-badge{
   display:flex; align-items:center; gap:5px;
+  height:24px; box-sizing:border-box;
   font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
-  padding:4px 10px 4px 8px; border-radius:var(--radius-full);
+  padding:0 10px 0 8px; border-radius:var(--radius-full);
   background:rgba(163,184,153,0.12); color:var(--sage); border:1px solid rgba(163,184,153,0.25);
   transition:all var(--dur-fast) var(--ease-out); white-space:nowrap;
 }
@@ -431,8 +432,6 @@ input[type=file]{display:none;}
   color:var(--amber); cursor:not-allowed; padding-right:40px;
 }
 .field input.is-locked:focus{border-color:rgba(212,162,76,0.45); background:rgba(212,162,76,0.09);}
-.field-hint{font-size:11.5px; color:var(--paper-faint); margin:7px 2px 0; line-height:1.4; transition:color var(--dur-fast) var(--ease-out);}
-.field-hint.locked{color:var(--amber);}
 .field input, .field select{
   width:100%; background:var(--ink-3); border:1px solid var(--line);
   border-radius:var(--radius-sm); padding:13px 14px; color:var(--paper);
@@ -442,6 +441,25 @@ input[type=file]{display:none;}
 }
 .field input:focus, .field select:focus{border-color:var(--sage); background:var(--ink-2);}
 .field input::placeholder{color:var(--paper-faint); font-weight:500;}
+
+/* ---------- date placeholder overlay ----------
+   Safari (terutama iOS) tidak menampilkan format "dd/mm/yyyy" bawaan saat
+   <input type="date"> dikosongkan — beda dari Chrome/Edge di desktop yang
+   tetap menampilkannya. Overlay ini menyamakan tampilan di semua browser:
+   teks placeholder ditampilkan manual via JS setiap kali value input kosong. */
+.date-field-wrap{position:relative; background:var(--ink-3); border:1px solid var(--line); border-radius:var(--radius-sm); transition:border-color var(--dur-fast), background var(--dur-fast);}
+.date-field-wrap:focus-within{border-color:var(--sage); background:var(--ink-2);}
+.date-field-wrap input[type="date"]{
+  position:relative; z-index:1; width:100%; border:none; background:transparent;
+  padding:13px 14px; color:var(--paper); font-size:15px; font-weight:600; outline:none;
+  appearance:none; -webkit-appearance:none;
+}
+.date-placeholder{
+  position:absolute; left:14px; top:50%; transform:translateY(-50%);
+  z-index:0; font-size:15px; font-weight:500; color:var(--paper-faint);
+  pointer-events:none; opacity:0; transition:opacity var(--dur-fast) var(--ease-out);
+}
+.date-placeholder.show{opacity:1;}
 .field-row{display:flex; gap:10px;}
 .field-row .field{flex:1;}
 .select-wrap{position:relative;}
@@ -790,7 +808,10 @@ input[type=file]{display:none;}
           <div id="subImportManual">
             <div class="field">
               <label>Tanggal Penjualan</label>
-              <input type="date" id="quickDate">
+              <div class="date-field-wrap">
+                <input type="date" id="quickDate">
+                <span class="date-placeholder" id="quickDatePlaceholder">dd/mm/yyyy</span>
+              </div>
             </div>
 
             <div class="field-row">
@@ -821,7 +842,6 @@ input[type=file]{display:none;}
                 <input type="text" id="quickFakturSuffix" placeholder="Contoh: PGR/VII/2026">
                 <svg class="input-lock-icon" id="fakturInputLockIcon" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               </div>
-              <p class="field-hint" id="fakturLockHint">Ikut bulan &amp; tahun berjalan otomatis. Klik gembok buat mengunci.</p>
             </div>
 
             <div class="quick-preview-box hidden" id="quickPreviewBox">
@@ -870,7 +890,10 @@ input[type=file]{display:none;}
 
           <div class="field">
             <label>Tanggal</label>
-            <input type="date" id="manualDate">
+            <div class="date-field-wrap">
+              <input type="date" id="manualDate">
+              <span class="date-placeholder" id="manualDatePlaceholder">dd/mm/yyyy</span>
+            </div>
           </div>
 
           <div class="field">

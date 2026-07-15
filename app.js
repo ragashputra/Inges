@@ -65,6 +65,22 @@ function todayLocalISO(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Tampilkan/sembunyikan overlay "dd/mm/yyyy" custom untuk <input type="date">.
+ * Dibutuhkan karena Safari (khususnya iOS) tidak menampilkan format bawaan
+ * saat input dikosongkan — beda dengan Chrome/Edge desktop yang tetap kasih
+ * lihat "dd/mm/yyyy". Dengan overlay ini, tampilannya konsisten di semua browser.
+ */
+function setupDatePlaceholder(inputId, placeholderId) {
+  const input = document.getElementById(inputId);
+  const placeholder = document.getElementById(placeholderId);
+  if (!input || !placeholder) return;
+  const sync = () => placeholder.classList.toggle('show', !input.value);
+  input.addEventListener('input', sync);
+  input.addEventListener('change', sync);
+  sync();
+}
+
 /* =========================================================================
    TOAST
    ========================================================================= */
@@ -812,9 +828,16 @@ function extractFakturNum(faktur) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+/** Format bagian angka nomor faktur jadi 4 digit (mis. "122/PGR/V/25" -> "0122/PGR/V/25"). */
+function padFakturNum(faktur) {
+  const m = faktur.match(/^(\d+)(\/.*)$/);
+  if (!m) return faktur;
+  return `${m[1].padStart(4, '0')}${m[2]}`;
+}
+
 function buildFakturRange(sortedFakturs) {
   if (!sortedFakturs.length) return '';
-  if (sortedFakturs.length === 1) return sortedFakturs[0];
+  if (sortedFakturs.length === 1) return padFakturNum(sortedFakturs[0]);
   const first = sortedFakturs[0];
   const last = sortedFakturs[sortedFakturs.length - 1];
   const firstNum = extractFakturNum(first);
@@ -822,8 +845,7 @@ function buildFakturRange(sortedFakturs) {
   // ambil suffix (bagian setelah nomor pertama) dari faktur terakhir sebagai referensi format
   const suffixMatch = last.match(/^\d+(\/.*)$/);
   const suffix = suffixMatch ? suffixMatch[1] : '';
-  const firstNumStr = String(firstNum).padStart(String(lastNum).length >= String(firstNum).length ? Math.min(4, String(firstNum).length) : String(firstNum).length, '0');
-  return `${firstNum}-${lastNum}${suffix}`;
+  return `${String(firstNum).padStart(4, '0')}-${String(lastNum).padStart(4, '0')}${suffix}`;
 }
 
 /**
@@ -927,7 +949,6 @@ function setupQuickEntry() {
   const lockIcon = $('#fakturLockIcon');
   const lockBadge = $('#fakturLockBadge');
   const lockBadgeText = $('#fakturLockBadgeText');
-  const lockHint = $('#fakturLockHint');
   const inputLockIcon = $('#fakturInputLockIcon');
 
   const iconLocked = '<rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
@@ -952,12 +973,6 @@ function setupQuickEntry() {
     if (lockBadge) lockBadge.classList.toggle('locked', suffixLocked);
     if (lockBadgeText) lockBadgeText.textContent = suffixLocked ? 'Terkunci' : 'Otomatis';
     if (inputLockIcon) inputLockIcon.classList.toggle('show', suffixLocked);
-    if (lockHint) {
-      lockHint.textContent = suffixLocked
-        ? 'Terkunci — kode ini dipakai terus walau reload. Klik gembok buat edit.'
-        : 'Ikut bulan & tahun berjalan otomatis. Klik gembok buat mengunci.';
-      lockHint.classList.toggle('locked', suffixLocked);
-    }
   };
 
   // default: tanggal hari ini. Kode faktur pakai yang dikunci kalau ada,
@@ -1830,6 +1845,8 @@ function init() {
   setupImportSubTabs();
   setupQuickEntry();
   setupManualForm();
+  setupDatePlaceholder('quickDate', 'quickDatePlaceholder');
+  setupDatePlaceholder('manualDate', 'manualDatePlaceholder');
   setupModals();
   setupCreateSheetModal();
   setupAkunPage();
