@@ -1027,7 +1027,33 @@ function matchExistingRowsForEntries(struct, entries) {
   const claimed = new Set();
   const matches = new Map();
 
+  // TAHAP 1 — cocokkan PERSIS (tanggal DAN faktur sekaligus sama).
+  // Ini harus dijalankan lebih dulu supaya tetap akurat walau ada beberapa
+  // baris lama dengan tanggal yang sama (mis. baris "cek fisik keluar" dan
+  // baris "cek fisik masuk" di hari yang sama) — sebelumnya kasus begini
+  // bikin pencocokan tahap 2 (longgar) langsung dianggap ambigu (>1 kandidat)
+  // padahal salah satunya sebenarnya cocok persis, sehingga baris yang
+  // seharusnya ditimpa malah ikut ke-insert ulang jadi dobel.
   entries.forEach((entry, idx) => {
+    const entryDateKey = dateObjToKey(entry.dateObj);
+    const entryFakturKey = normalizeFakturKey(entry.fakturKey);
+    if (!entryDateKey || !entryFakturKey) return;
+
+    const exactCandidates = existing.filter(ex =>
+      !claimed.has(ex.rowNum1) && ex.dateKey === entryDateKey && ex.fakturKey === entryFakturKey
+    );
+    if (exactCandidates.length === 1) {
+      matches.set(idx, exactCandidates[0].rowNum1);
+      claimed.add(exactCandidates[0].rowNum1);
+    }
+  });
+
+  // TAHAP 2 — untuk entri yang belum ketemu pasangan persisnya, baru coba
+  // cocokkan longgar (tanggal ATAU faktur saja). Tetap aman: kalau hasilnya
+  // masih ambigu (>1 kandidat) atau kosong, entri itu dibiarkan sebagai
+  // baris BARU (insert), bukan ditimpa — supaya tidak pernah salah menimpa.
+  entries.forEach((entry, idx) => {
+    if (matches.has(idx)) return;
     const entryDateKey = dateObjToKey(entry.dateObj);
     const entryFakturKey = normalizeFakturKey(entry.fakturKey);
 

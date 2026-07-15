@@ -4,7 +4,7 @@
 
 // Naikkan angka versi ini SETIAP KALI index.html/app.js diubah, supaya
 // browser pengguna lama otomatis buang cache basi dan ambil versi terbaru.
-const CACHE_NAME = 'inges-shell-v3';
+const CACHE_NAME = 'inges-shell-v4';
 const SHELL_FILES = [
   './',
   './index.html',
