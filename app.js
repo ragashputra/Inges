@@ -44,6 +44,8 @@ const state = {
   lastSaldoRow: null,        // row index terakhir berisi data (sebelum "Saldo Akhir")
   saldoAkhirRow: null,
   parsedDays: [],            // hasil parse csv -> [{date, fakturs:[], count, debit}]
+  pendingWriteStruct: null,  // hasil readSheetStructure yang dipakai buat cek duplikat sebelum nulis
+  pendingWriteMatches: null, // Map index entri -> nomor baris lama yang akan ditimpa (anti-duplikat)
   activeTab: 'import',
   sessionLog: [],
 };
@@ -962,6 +964,90 @@ function formatTanggalForSheet(dateObj) {
 }
 
 /* =========================================================================
+   ANTI-DUPLIKAT: cocokkan entri baru dengan baris yang SUDAH ADA di sheet
+   ========================================================================= */
+
+/** "20/5/2025", "20-05-2025", dst -> "2025-05-20" (null kalau tidak bisa diparse). */
+function normalizeDateKey(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return null;
+  const [, d, mo, y] = m;
+  return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+/** Date object -> "2025-05-20", format sama seperti normalizeDateKey supaya bisa dibandingkan langsung. */
+function dateObjToKey(dateObj) {
+  if (!dateObj) return null;
+  const y = dateObj.getFullYear();
+  const mo = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
+/** Normalisasi kode/nomor faktur biar perbandingan tidak kejebak spasi atau besar-kecil huruf. */
+function normalizeFakturKey(raw) {
+  if (!raw) return '';
+  return String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Cari baris yang SUDAH ADA di sheet (berdasarkan struct yang FRESH, baru
+ * dibaca langsung dari spreadsheet) yang tanggalnya ATAU nomor fakturnya
+ * sama persis dengan tiap entri baru yang mau ditulis. Dipakai baik untuk
+ * Cek Fisik Keluar (CSV/input cepat) maupun Cek Fisik Masuk (form manual) —
+ * supaya input yang sama tidak menciptakan baris dobel, melainkan menimpa
+ * baris lama.
+ *
+ * Aturan aman: kalau satu entri baru cocok dengan LEBIH dari satu baris lama
+ * (ambigu) atau tidak cocok sama sekali, entri itu diperlakukan sebagai baris
+ * BARU (insert) — bukan ditimpa — supaya tidak pernah salah menimpa data yang
+ * sudah benar. Satu baris lama juga cuma bisa "diklaim" oleh satu entri baru.
+ *
+ * @param {object} struct - hasil readSheetStructure(sheetName) yang FRESH
+ * @param {Array<{dateObj: Date, fakturKey: string}>} entries
+ * @returns {Map<number, number>} index entri -> nomor baris (1-indexed) yang akan ditimpa
+ */
+function matchExistingRowsForEntries(struct, entries) {
+  const existing = [];
+  for (let i = struct.headerRow + 2; i <= struct.lastFilled; i++) {
+    const r = struct.rows[i];
+    if (!r) continue;
+    const tanggalRaw = r[1] || '';
+    const fakturRaw = r[2] || '';
+    if (!tanggalRaw && !fakturRaw) continue; // baris kosong beneran, lewati
+    existing.push({
+      rowNum1: i + 1,
+      dateKey: normalizeDateKey(tanggalRaw),
+      fakturKey: normalizeFakturKey(fakturRaw),
+    });
+  }
+
+  const claimed = new Set();
+  const matches = new Map();
+
+  entries.forEach((entry, idx) => {
+    const entryDateKey = dateObjToKey(entry.dateObj);
+    const entryFakturKey = normalizeFakturKey(entry.fakturKey);
+
+    const candidates = existing.filter(ex =>
+      !claimed.has(ex.rowNum1) &&
+      ((entryDateKey && ex.dateKey && ex.dateKey === entryDateKey) ||
+       (entryFakturKey && ex.fakturKey && ex.fakturKey === entryFakturKey))
+    );
+
+    if (candidates.length === 1) {
+      matches.set(idx, candidates[0].rowNum1);
+      claimed.add(candidates[0].rowNum1);
+    }
+    // kalau 0 atau >1 kandidat -> biarkan sebagai insert baru (aman, tidak menimpa apapun)
+  });
+
+  return matches;
+}
+
+/* =========================================================================
    UI: FILE HANDLING
    ========================================================================= */
 function setupDropzone() {
@@ -1283,20 +1369,43 @@ async function confirmAndUploadImport() {
     return;
   }
 
-  const totalDebit = state.parsedDays.reduce((s, d) => s + d.debit, 0);
-  const totalUnits = state.parsedDays.reduce((s, d) => s + d.count, 0);
+  const btnUpload = $('#btnUpload');
+  setButtonLoading(btnUpload, true, 'Memeriksa…');
+  try {
+    // Baca ulang struktur sheet langsung dari spreadsheet (bukan cache lokal)
+    // supaya deteksi baris duplikat akurat, lalu simpan buat dipakai lagi
+    // di executeImportWrite (tanpa fetch dua kali).
+    const struct = await readSheetStructure(state.activeSheetName);
+    state.saldoAkhirRow = struct.saldoAkhirRow1;
+    state.lastSaldoRow = struct.lastFilled + 1;
 
-  $('#confirmSheetName').textContent = state.activeSheetName;
-  $('#confirmTable').innerHTML = `
-    <div class="confirm-row"><span>Jumlah hari</span><span>${state.parsedDays.length}</span></div>
-    <div class="confirm-row"><span>Total unit terjual</span><span>${totalUnits}</span></div>
-    <div class="confirm-row"><span>Total debit cek fisik</span><span>-${totalDebit} pcs</span></div>
-    <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() - totalDebit)} pcs</span></div>
-  `;
-  $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
-  openModal('#confirmModal');
+    const entries = state.parsedDays.map(day => ({ dateObj: day.dateObj, fakturKey: day.fakturRange }));
+    const matches = matchExistingRowsForEntries(struct, entries);
+    state.pendingWriteStruct = struct;
+    state.pendingWriteMatches = matches;
 
-  $('#btnConfirmWrite').onclick = () => executeImportWrite();
+    const totalDebit = state.parsedDays.reduce((s, d) => s + d.debit, 0);
+    const totalUnits = state.parsedDays.reduce((s, d) => s + d.count, 0);
+    const dupCount = matches.size;
+
+    $('#confirmSheetName').textContent = state.activeSheetName;
+    $('#confirmTable').innerHTML = `
+      <div class="confirm-row"><span>Jumlah hari</span><span>${state.parsedDays.length}</span></div>
+      <div class="confirm-row"><span>Total unit terjual</span><span>${totalUnits}</span></div>
+      <div class="confirm-row"><span>Total debit cek fisik</span><span>-${totalDebit} pcs</span></div>
+      <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() - totalDebit)} pcs</span></div>
+      ${dupCount > 0 ? `<div class="confirm-row confirm-row-warn"><span>Menimpa data lama</span><span>${dupCount} hari (tanggal/faktur sudah ada)</span></div>` : ''}
+    `;
+    $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
+    openModal('#confirmModal');
+
+    $('#btnConfirmWrite').onclick = () => executeImportWrite();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Gagal memeriksa data sheet.', 'error');
+  } finally {
+    setButtonLoading(btnUpload, false, 'Tulis Sekarang');
+  }
 }
 
 function getCurrentSaldoValue() {
@@ -1310,45 +1419,82 @@ async function executeImportWrite() {
   setButtonLoading(btn, true, 'Menulis…');
 
   try {
-    const startRow = state.lastSaldoRow + 1; // baris pertama yang akan diisi
-    const values = state.parsedDays.map((day, idx) => {
-      const rowNum = startRow + idx;
-      const prevRowNum = rowNum - 1;
-      return [
-        formatTanggalForSheet(day.dateObj),      // B: Tanggal
-        day.fakturRange,                          // C: Nomor Faktur Penjualan
-        '',                                        // D: Credit (kosong)
-        day.debit,                                 // E: Debit
-        buildSaldoFormula(rowNum, prevRowNum), // F: Saldo
-      ];
+    // Kalau untuk suatu alasan belum ada hasil pengecekan duplikat (mis. modal
+    // dibuka lewat jalur lain), baca ulang di sini juga sebagai jaga-jaga.
+    const struct = state.pendingWriteStruct || await readSheetStructure(state.activeSheetName);
+    const entries = state.parsedDays.map(day => ({ dateObj: day.dateObj, fakturKey: day.fakturRange }));
+    const matches = state.pendingWriteMatches || matchExistingRowsForEntries(struct, entries);
+
+    const updateData = []; // {range, values} — baris LAMA yang ditimpa (duplikat)
+    const insertDays = []; // hari yang benar-benar BARU (tidak ada di sheet)
+
+    state.parsedDays.forEach((day, idx) => {
+      const matchedRow = matches.get(idx);
+      if (matchedRow) {
+        // Duplikat -> TIMPA baris yang sudah ada. Formula Saldo di baris itu
+        // (dan baris-baris sesudahnya) otomatis ikut terhitung ulang oleh
+        // Google Sheets karena posisi barisnya tidak berubah, cukup nilai
+        // Tanggal/Faktur/Debit-nya saja yang diganti.
+        updateData.push({
+          range: `'${state.activeSheetName}'!B${matchedRow}:E${matchedRow}`,
+          values: [[formatTanggalForSheet(day.dateObj), day.fakturRange, '', day.debit]],
+        });
+      } else {
+        insertDays.push(day);
+      }
     });
 
-    const range = `'${state.activeSheetName}'!B${startRow}:F${startRow + values.length - 1}`;
-
-    // Jika ada baris "Saldo Akhir" di bawah, kita perlu insert baris baru agar tidak menimpanya
-    if (state.saldoAkhirRow && startRow + values.length > state.saldoAkhirRow) {
-      await insertRowsBeforeSaldoAkhir(values.length);
+    // Sisipkan baris baru HANYA untuk entri yang benar-benar baru
+    const lastSaldoRow1 = state.lastSaldoRow || (struct.lastFilled + 1); // 1-indexed baris terakhir terisi
+    const startRow = lastSaldoRow1 + 1;
+    if (insertDays.length) {
+      if (state.saldoAkhirRow && startRow + insertDays.length > state.saldoAkhirRow) {
+        await insertRowsBeforeSaldoAkhir(insertDays.length);
+      }
+      const insertValues = insertDays.map((day, idx) => {
+        const rowNum = startRow + idx;
+        const prevRowNum = rowNum - 1;
+        return [
+          formatTanggalForSheet(day.dateObj),      // B: Tanggal
+          day.fakturRange,                          // C: Nomor Faktur Penjualan
+          '',                                        // D: Credit (kosong)
+          day.debit,                                 // E: Debit
+          buildSaldoFormula(rowNum, prevRowNum), // F: Saldo
+        ];
+      });
+      updateData.push({
+        range: `'${state.activeSheetName}'!B${startRow}:F${startRow + insertValues.length - 1}`,
+        values: insertValues,
+      });
     }
 
-    await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
-      method: 'PUT',
-      body: JSON.stringify({ range, values }),
-    });
+    if (updateData.length) {
+      await sheetsFetch(`${state.spreadsheetId}/values:batchUpdate`, {
+        method: 'POST',
+        body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updateData }),
+      });
+    }
 
     closeModal('#confirmModal');
-    toast(`${values.length} baris berhasil ditulis ke ${state.activeSheetName}`, 'success');
+    const dupCount = matches.size;
+    const msg = dupCount > 0
+      ? `${insertDays.length} baris baru ditulis, ${dupCount} baris duplikat ditimpa di ${state.activeSheetName}`
+      : `${insertDays.length} baris berhasil ditulis ke ${state.activeSheetName}`;
+    toast(msg, 'success');
     const manualCount = state.parsedDays.filter(d => d.source === 'manual').length;
     const logDesc = manualCount > 0
-      ? `${values.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit, ${manualCount} input cepat)`
-      : `${values.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit)`;
+      ? `${state.parsedDays.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit, ${manualCount} input cepat${dupCount > 0 ? `, ${dupCount} menimpa` : ''})`
+      : `${state.parsedDays.length} hari (${state.parsedDays.reduce((s,d)=>s+d.debit,0)} pcs debit${dupCount > 0 ? `, ${dupCount} menimpa` : ''})`;
     logSession('import', logDesc);
+    state.pendingWriteStruct = null;
+    state.pendingWriteMatches = null;
     resetImportPanel();
     await loadActiveSheetContext();
   } catch (err) {
     console.error(err);
     toast(err.message || 'Gagal menulis ke Sheets.', 'error');
   } finally {
-    setButtonLoading(btn, false, 'Tulis Sekarang');
+    setButtonLoading(btn, false, DEFAULT_CONFIRM_BTN_LABEL);
   }
 }
 
@@ -1562,51 +1708,95 @@ function validateManualForm() {
   $('#btnManualSubmit').disabled = !(faktur && credit > 0 && date);
 }
 
-function confirmManualSubmit() {
+async function confirmManualSubmit() {
   const faktur = $('#manualFaktur').value.trim();
   const credit = parseFloat($('#manualCredit').value);
   const dateStr = $('#manualDate').value;
   const dateObj = new Date(dateStr + 'T00:00:00');
 
-  $('#confirmSheetName').textContent = state.activeSheetName || '—';
-  $('#confirmTable').innerHTML = `
-    <div class="confirm-row"><span>Tanggal</span><span>${formatTanggalForSheet(dateObj)}</span></div>
-    <div class="confirm-row"><span>Referensi</span><span>${faktur}</span></div>
-    <div class="confirm-row"><span>Credit</span><span>+${formatNum(credit)} pcs</span></div>
-    <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() + credit)} pcs</span></div>
-  `;
-  $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
-  openModal('#confirmModal');
-  $('#btnConfirmWrite').onclick = () => executeManualWrite(dateObj, faktur, credit);
+  const btnSubmit = $('#btnManualSubmit');
+  setButtonLoading(btnSubmit, true, 'Memeriksa…');
+  try {
+    // Baca ulang struktur sheet langsung dari spreadsheet (bukan cache lokal)
+    // supaya deteksi baris duplikat akurat, lalu simpan buat dipakai lagi
+    // di executeManualWrite (tanpa fetch dua kali).
+    const struct = await readSheetStructure(state.activeSheetName);
+    state.saldoAkhirRow = struct.saldoAkhirRow1;
+    state.lastSaldoRow = struct.lastFilled + 1;
+
+    const matches = matchExistingRowsForEntries(struct, [{ dateObj, fakturKey: faktur }]);
+    state.pendingWriteStruct = struct;
+    state.pendingWriteMatches = matches;
+    const matchedRow = matches.get(0) || null;
+
+    $('#confirmSheetName').textContent = state.activeSheetName || '—';
+    $('#confirmTable').innerHTML = `
+      <div class="confirm-row"><span>Tanggal</span><span>${formatTanggalForSheet(dateObj)}</span></div>
+      <div class="confirm-row"><span>Referensi</span><span>${faktur}</span></div>
+      <div class="confirm-row"><span>Credit</span><span>+${formatNum(credit)} pcs</span></div>
+      <div class="confirm-row"><span>Saldo setelah ditulis</span><span>${formatNum(getCurrentSaldoValue() + credit)} pcs</span></div>
+      ${matchedRow ? `<div class="confirm-row confirm-row-warn"><span>Menimpa data lama</span><span>Baris ${matchedRow} (tanggal/referensi sudah ada)</span></div>` : ''}
+    `;
+    $('#confirmBtnLabel').textContent = DEFAULT_CONFIRM_BTN_LABEL;
+    openModal('#confirmModal');
+    $('#btnConfirmWrite').onclick = () => executeManualWrite(dateObj, faktur, credit);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Gagal memeriksa data sheet.', 'error');
+  } finally {
+    setButtonLoading(btnSubmit, false, 'Tulis ke Google Sheets');
+  }
 }
 
 async function executeManualWrite(dateObj, faktur, credit) {
   const btn = $('#btnConfirmWrite');
   setButtonLoading(btn, true, 'Menulis…');
   try {
-    const rowNum = state.lastSaldoRow + 1;
-    const prevRowNum = rowNum - 1;
-    const values = [[
-      formatTanggalForSheet(dateObj),
-      faktur,
-      credit,
-      '',
-      buildSaldoFormula(rowNum, prevRowNum),
-    ]];
-    const range = `'${state.activeSheetName}'!B${rowNum}:F${rowNum}`;
+    // Kalau untuk suatu alasan belum ada hasil pengecekan duplikat, baca
+    // ulang di sini juga sebagai jaga-jaga.
+    const struct = state.pendingWriteStruct || await readSheetStructure(state.activeSheetName);
+    const matches = state.pendingWriteMatches || matchExistingRowsForEntries(struct, [{ dateObj, fakturKey: faktur }]);
+    const matchedRow = matches.get(0) || null;
 
-    if (state.saldoAkhirRow && rowNum >= state.saldoAkhirRow) {
-      await insertRowsBeforeSaldoAkhir(1);
+    if (matchedRow) {
+      // Duplikat -> TIMPA baris yang sudah ada, bukan tambah baris baru.
+      // Formula Saldo di baris itu otomatis ikut terhitung ulang karena
+      // posisi barisnya tidak berubah.
+      const range = `'${state.activeSheetName}'!B${matchedRow}:E${matchedRow}`;
+      await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        body: JSON.stringify({ range, values: [[formatTanggalForSheet(dateObj), faktur, credit, '']] }),
+      });
+      toast(`Baris lama ditimpa dengan credit ${formatNum(credit)} pcs`, 'success');
+      logSession('manual', `+${formatNum(credit)} pcs (${faktur}) — menimpa baris ${matchedRow}`);
+    } else {
+      const rowNum = (state.lastSaldoRow || struct.lastFilled + 1) + 1;
+      const prevRowNum = rowNum - 1;
+      const values = [[
+        formatTanggalForSheet(dateObj),
+        faktur,
+        credit,
+        '',
+        buildSaldoFormula(rowNum, prevRowNum),
+      ]];
+      const range = `'${state.activeSheetName}'!B${rowNum}:F${rowNum}`;
+
+      if (state.saldoAkhirRow && rowNum >= state.saldoAkhirRow) {
+        await insertRowsBeforeSaldoAkhir(1);
+      }
+
+      await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        body: JSON.stringify({ range, values }),
+      });
+
+      toast(`Credit ${formatNum(credit)} pcs berhasil ditulis`, 'success');
+      logSession('manual', `+${formatNum(credit)} pcs (${faktur})`);
     }
 
-    await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, {
-      method: 'PUT',
-      body: JSON.stringify({ range, values }),
-    });
-
     closeModal('#confirmModal');
-    toast(`Credit ${formatNum(credit)} pcs berhasil ditulis`, 'success');
-    logSession('manual', `+${formatNum(credit)} pcs (${faktur})`);
+    state.pendingWriteStruct = null;
+    state.pendingWriteMatches = null;
 
     $('#manualFaktur').value = '';
     $('#manualCredit').value = '';
@@ -1617,7 +1807,7 @@ async function executeManualWrite(dateObj, faktur, credit) {
     console.error(err);
     toast(err.message || 'Gagal menulis ke Sheets.', 'error');
   } finally {
-    setButtonLoading(btn, false, 'Tulis Sekarang');
+    setButtonLoading(btn, false, DEFAULT_CONFIRM_BTN_LABEL);
   }
 }
 
