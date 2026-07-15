@@ -2041,13 +2041,10 @@ function bulanLongCapitalized(idx) {
   return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
-/** Tanggal hari ini -> "dd/mm/yyyy" (dipakai di baris pembuka surat, realtime saat pengajuan). */
+/** Tanggal hari ini -> format panjang "20 Januari 2026" (dipakai di baris pembuka surat, realtime saat pengajuan). */
 function formatTanggalSuratHariIni() {
   const d = new Date();
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return `${d.getDate()} ${bulanLongCapitalized(d.getMonth())} ${d.getFullYear()}`;
 }
 
 function escapeHtml(str) {
@@ -2343,18 +2340,26 @@ function setupCfMonthRows() {
 }
 
 /**
- * Paksa isian jadi HURUF KAPITAL otomatis sambil diketik, sambil menjaga
+ * Ubah teks jadi "Title Case": huruf pertama tiap kata KAPITAL, sisanya
+ * huruf kecil — mis. "budi SANTOSO" -> "Budi Santoso".
+ */
+function toTitleCase(str) {
+  return str.toLowerCase().replace(/(^|[\s'-])([a-zà-ÿ])/g, (m, sep, ch) => sep + ch.toUpperCase());
+}
+
+/**
+ * Paksa isian jadi Title Case otomatis sambil diketik, sambil menjaga
  * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
  */
 function setupCfUppercaseFields() {
-  ['cfNamaSO', 'cfNamaPengirim'].forEach(id => {
+  ['cfNamaSO', 'cfNamaPengirim', 'cfKotaTujuan', 'cfVia'].forEach(id => {
     const input = $('#' + id);
     if (!input) return;
     input.addEventListener('input', () => {
       const pos = input.selectionStart;
-      const upper = input.value.toUpperCase();
-      if (input.value !== upper) {
-        input.value = upper;
+      const titled = toTitleCase(input.value);
+      if (input.value !== titled) {
+        input.value = titled;
         if (pos !== null) input.setSelectionRange(pos, pos);
       }
     });
@@ -2430,6 +2435,8 @@ ${namaSO}`;
 /* ---------------- Validasi form sebelum pratinjau ---------------- */
 function cfValidateForm() {
   const errors = [];
+  if (state.cfToEditing) errors.push('Selesaikan dulu (centang ✓) edit alamat Kepada sebelum mengirim.');
+  if (state.cfCcList.some(c => c.editing)) errors.push('Selesaikan dulu (centang ✓) edit alamat CC sebelum mengirim.');
   if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
   if (!$('#cfNamaSO').value.trim()) errors.push('Nama SO belum diisi.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
