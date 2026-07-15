@@ -101,6 +101,17 @@ function toast(message, type = 'success', duration = 3400) {
 }
 
 /* =========================================================================
+   GATE DEFAULT COPY
+   Ditangkap langsung dari teks yang ada di index.html saat halaman dimuat —
+   BUKAN di-hardcode di sini. Ini supaya kalau teks di gateText / label tombol
+   diedit lewat index.html, JS otomatis ikut tanpa perlu diubah dua tempat
+   (sebelumnya showSignInGate() menimpa teks HTML dengan string lama yang
+   ketinggalan, jadi perubahan di HTML kelihatan "tidak ngaruh").
+   ========================================================================= */
+let DEFAULT_GATE_TEXT = '';
+let DEFAULT_SIGNIN_LABEL = 'Masuk dengan Google';
+
+/* =========================================================================
    GOOGLE OAUTH (GIS token client)
    ========================================================================= */
 function initGoogleAuth() {
@@ -204,10 +215,10 @@ function showSignInGate() {
   const btn = $('#btnSignIn');
   const btnLabel = $('#btnSignInLabel');
   const foot = $('#gateFoot');
-  if (text) text.textContent = 'Rekap cek fisik dari listing penjualan langsung ke Google Sheets. Masuk dengan akun Google untuk mulai.';
+  if (text) text.textContent = DEFAULT_GATE_TEXT;
   if (spinner) spinner.classList.add('hidden');
   if (btn) btn.classList.remove('hidden');
-  if (btnLabel) btnLabel.textContent = 'Masuk dengan Google';
+  if (btnLabel) btnLabel.textContent = DEFAULT_SIGNIN_LABEL;
   if (foot) foot.classList.remove('hidden');
   $('#gate').classList.remove('hidden');
   state.isReconnecting = false;
@@ -1968,6 +1979,13 @@ function setButtonLoading(btn, loading, label) {
    INIT
    ========================================================================= */
 function init() {
+  // Tangkap teks asli dari HTML dulu, sebelum ada fungsi apapun (mis. showSignInGate)
+  // yang mungkin menimpanya — supaya teks di index.html selalu jadi sumber kebenaran.
+  const gateTextEl = $('#gateText');
+  const btnSignInLabelEl = $('#btnSignInLabel');
+  if (gateTextEl && gateTextEl.textContent.trim()) DEFAULT_GATE_TEXT = gateTextEl.textContent.trim();
+  if (btnSignInLabelEl && btnSignInLabelEl.textContent.trim()) DEFAULT_SIGNIN_LABEL = btnSignInLabelEl.textContent.trim();
+
   $('#btnSignIn').addEventListener('click', requestSignIn);
   setupDropzone();
   setupImportSubTabs();
