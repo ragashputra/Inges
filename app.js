@@ -2527,7 +2527,7 @@ function toTitleCase(str) {
  * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
  */
 function setupCfUppercaseFields() {
-  ['cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
+  ['cfNamaSOText', 'cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
     const input = $('#' + id);
     if (!input) return;
     input.addEventListener('input', () => {
@@ -2600,8 +2600,16 @@ function cfBuildSubject() {
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
+/** Gabungkan kategori (SO/KRO/RRO/HO) + nama tempat jadi satu string, mis. "SO Pinggir". */
+function cfNamaSOFull() {
+  const kategori = $('#cfNamaSO').value.trim();
+  const nama = $('#cfNamaSOText').value.trim();
+  if (kategori && nama) return `${kategori} ${nama}`;
+  return kategori || nama || 'NAMA SO';
+}
+
 function cfBuildBody() {
-  const namaSO = $('#cfNamaSO').value.trim() || 'NAMA SO';
+  const namaSO = cfNamaSOFull();
   const namaPengirim = $('#cfNamaPengirim').value.trim() || 'NAMA PENGIRIM';
   const kota = $('#cfKotaTujuan').value.trim() || 'Kota Tujuan';
   const via = $('#cfVia').value.trim() || 'Ibu Lynda';
@@ -2635,7 +2643,8 @@ function cfValidateForm() {
   if (state.cfToEditing) errors.push('Selesaikan dulu (centang ✓) edit alamat Kepada sebelum mengirim.');
   if (state.cfCcList.some(c => c.editing)) errors.push('Selesaikan dulu (centang ✓) edit alamat CC sebelum mengirim.');
   if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
-  if (!$('#cfNamaSO').value.trim()) errors.push('Nama SO belum diisi.');
+  if (!$('#cfNamaSO').value.trim()) errors.push('Kategori SO (SO/KRO/RRO/HO) belum dipilih.');
+  if (!$('#cfNamaSOText').value.trim()) errors.push('Nama SO belum diisi.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
   if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota tujuan belum diisi.');
   if (!$('#cfVia').value.trim()) errors.push('Via belum diisi.');
@@ -2767,6 +2776,7 @@ async function cfSendEmail() {
 /** Bersihkan form setelah email berhasil terkirim, siap dipakai untuk permohonan berikutnya. */
 function cfResetForm() {
   $('#cfNamaSO').value = '';
+  $('#cfNamaSOText').value = '';
   $('#cfNamaPengirim').value = '';
   $('#cfKotaTujuan').value = '';
   $('#cfVia').value = '';

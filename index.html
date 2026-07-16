@@ -288,6 +288,11 @@ input,select,textarea{font-family:inherit;}
 }
 .day-info .periode-tag svg{width:10px; height:10px; flex-shrink:0;}
 .email-preview-meta-row .meta-muted{font-style:italic; color:var(--paper-faint); font-weight:500;}
+
+/* baris gabungan "Nama SO": dropdown kategori (SO/KRO/RRO/HO) + input nama tempat, sejajar */
+.cf-nama-so-row{display:flex; gap:8px;}
+.cf-nama-so-row .cf-nama-so-select{flex:0 0 96px;}
+.cf-nama-so-row input{flex:1; min-width:0;}
 .month-switch-btn{
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
   width:24px; height:24px; padding:0; border-radius:50%; border:none; cursor:pointer;
@@ -1176,27 +1181,33 @@ input[type=file]{display:none;}
          <div class="field-row">
            <div class="field">
              <label>Nama SO</label>
-             <div class="select-wrap">
-               <select id="cfNamaSO">
-                 <option value="" disabled selected>Pilih SO</option>
-                 <option value="SO">SO</option>
-                 <option value="KRO">KRO</option>
-                 <option value="RRO">RRO</option>
-                 <option value="HO">HO</option>
-               </select>
+             <div class="cf-nama-so-row">
+               <div class="select-wrap cf-nama-so-select">
+                 <select id="cfNamaSO">
+                   <option value="" disabled selected>Pilih</option>
+                   <option value="SO">SO</option>
+                   <option value="KRO">KRO</option>
+                   <option value="RRO">RRO</option>
+                   <option value="HO">HO</option>
+                 </select>
+               </div>
+               <input type="text" id="cfNamaSOText" placeholder="Cth: Pinggir">
              </div>
-           </div>
-           <div class="field">
-             <label>Nama Pengirim</label>
-             <input type="text" id="cfNamaPengirim" placeholder="Cth: Ragash">
            </div>
          </div>
 
          <div class="field-row">
            <div class="field">
+             <label>Nama Pengirim</label>
+             <input type="text" id="cfNamaPengirim" placeholder="Cth: Ragash">
+           </div>
+           <div class="field">
              <label>Ke (Kota Tujuan)</label>
              <input type="text" id="cfKotaTujuan" placeholder="Cth: Pekanbaru">
            </div>
+         </div>
+
+         <div class="field-row">
            <div class="field">
              <label>Via</label>
              <input type="text" id="cfVia" placeholder="Cth: RRO">
