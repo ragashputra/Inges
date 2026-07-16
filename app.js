@@ -2600,12 +2600,12 @@ function cfBuildSubject() {
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
-/** Gabungkan kategori (SO/KRO/RRO/HO) + nama tempat jadi satu string, mis. "SO Pinggir". */
+/** Gabungkan kategori (SO/KRO/RRO/HO) + nama Area/Unit Usaha jadi satu string, mis. "SO Pinggir". */
 function cfNamaSOFull() {
   const kategori = $('#cfNamaSO').value.trim();
   const nama = $('#cfNamaSOText').value.trim();
   if (kategori && nama) return `${kategori} ${nama}`;
-  return kategori || nama || 'NAMA SO';
+  return kategori || nama || 'NAMA AREA/UNIT USAHA';
 }
 
 function cfBuildBody() {
@@ -2643,8 +2643,8 @@ function cfValidateForm() {
   if (state.cfToEditing) errors.push('Selesaikan dulu (centang ✓) edit alamat Kepada sebelum mengirim.');
   if (state.cfCcList.some(c => c.editing)) errors.push('Selesaikan dulu (centang ✓) edit alamat CC sebelum mengirim.');
   if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
-  if (!$('#cfNamaSO').value.trim()) errors.push('Kategori SO (SO/KRO/RRO/HO) belum dipilih.');
-  if (!$('#cfNamaSOText').value.trim()) errors.push('Nama SO belum diisi.');
+  if (!$('#cfNamaSO').value.trim()) errors.push('Kategori Area/Unit Usaha (SO/KRO/RRO/HO) belum dipilih.');
+  if (!$('#cfNamaSOText').value.trim()) errors.push('Nama Area/Unit Usaha belum diisi.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
   if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota tujuan belum diisi.');
   if (!$('#cfVia').value.trim()) errors.push('Via belum diisi.');
