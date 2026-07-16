@@ -95,7 +95,7 @@
   color-scheme: light;
 }
 
-*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent; accent-color:var(--sage);}
 html,body{
   margin:0; padding:0; height:100%;
   background:var(--ink-0);
@@ -294,6 +294,16 @@ input,select,textarea{font-family:inherit;}
 .cf-nama-so-row{display:flex; gap:8px;}
 .cf-nama-so-row .cf-nama-so-select{flex:0 0 96px;}
 .cf-nama-so-row input{flex:1; min-width:0;}
+
+/* indikator kecil "Menyinkronkan..." di judul halaman Riwayat, muncul sesaat
+   selagi riwayat disamakan dengan tab cloud (lihat syncRiwayatFromCloud) */
+.riwayat-sync-status{
+  display:none; align-items:center; gap:5px; margin-left:auto;
+  font-size:10.5px; font-weight:600; color:var(--paper-faint); font-family:var(--font-body, inherit);
+}
+.riwayat-sync-status.show{display:inline-flex;}
+.riwayat-sync-status .dot{width:5px; height:5px; border-radius:50%; background:var(--sage); animation:riwayatDotPulse 1s ease-in-out infinite;}
+@keyframes riwayatDotPulse{0%,100%{opacity:0.25;} 50%{opacity:1;}}
 .month-switch-btn{
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
   width:24px; height:24px; padding:0; border-radius:50%; border:none; cursor:pointer;
@@ -404,7 +414,12 @@ input[type=file]{display:none;}
 .day-date b{font-family:var(--font-display); font-size:16px; font-weight:700; line-height:1.1;}
 .day-date span{font-size:10px; color:var(--paper-faint); text-transform:uppercase; font-weight:700;}
 .day-info{flex:1; min-width:0;}
-.day-info .faktur-range{font-size:12px; font-weight:600; color:var(--paper-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.day-info .faktur-range{font-size:12px; font-weight:600; color:var(--paper-dim); overflow-wrap:break-word;}
+.day-info .faktur-gap-warn{
+  display:flex; align-items:flex-start; gap:5px; margin-top:5px;
+  font-size:10.5px; font-weight:600; line-height:1.35; color:var(--amber);
+}
+.day-info .faktur-gap-warn svg{width:13px; height:13px; flex-shrink:0; margin-top:1px;}
 .day-info .unit-count{font-size:11px; color:var(--paper-faint); margin-top:2px;}
 .day-debit{
   font-family:var(--font-display); font-weight:700; font-size:15px; color:var(--rust-bright);
@@ -477,7 +492,13 @@ input[type=file]{display:none;}
   transition:border-color var(--dur-fast), background var(--dur-fast);
   appearance:none; -webkit-appearance:none;
 }
-.field input:focus, .field select:focus{border-color:var(--sage); background:var(--ink-2);}
+.field input:focus{border-color:var(--sage); background:var(--ink-2);}
+/* select dipisah dari input: browser mobile (terutama Android) sering
+   auto-focus/blur super cepat pas native picker ditutup setelah pilih opsi,
+   jadi kalau border langsung solid var(--sage) (hijau terang di dark mode)
+   akan terasa "ngeflash". Dibikin lebih redup + dicampur (color-mix) biar
+   tetap ada feedback tapi tidak menyilaukan/berkedip. */
+.field select:focus{border-color:color-mix(in srgb, var(--sage) 45%, var(--line)); background:var(--ink-2);}
 .field input::placeholder{color:var(--paper-faint); font-weight:500;}
 
 /* ---------- date placeholder overlay ----------
@@ -1244,6 +1265,7 @@ input[type=file]{display:none;}
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             Riwayat
+            <span class="riwayat-sync-status" id="riwayatSyncStatus"><span class="dot"></span>Menyinkronkan…</span>
           </h3>
 
           <!-- ---- Sub-tab: Tulis Sheet / Email Cek Fisik ---- -->

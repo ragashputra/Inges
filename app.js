@@ -27,6 +27,20 @@ const STORAGE_KEYS = {
 const SESSION_LOG_MAX_ENTRIES = 200;   // batas biar localStorage tidak membengkak tak terbatas
 const CF_EMAIL_LOG_MAX_ENTRIES = 100;  // batas riwayat email cek fisik yang disimpan di perangkat
 
+/**
+ * Riwayat (Tulis Sheet & Email Cek Fisik) awalnya cuma tersimpan di
+ * localStorage per-perangkat — makanya riwayat yang dibuat dari laptop
+ * tidak pernah muncul di HP, dan sebaliknya (localStorage memang tidak
+ * pernah ikut sinkron antar device/browser, beda dengan data Sheets).
+ * Untuk itu tiap entri riwayat JUGA disalin ke tab tersembunyi di
+ * spreadsheet aktif (sheet yang sama dipakai di semua perangkat), supaya
+ * begitu dibuka di perangkat lain, riwayatnya otomatis ikut muncul.
+ * localStorage tetap dipakai sebagai cache offline-first (biar rendernya
+ * instan), tab ini cuma jadi "sumber kebenaran" bersama buat sinkronisasi.
+ */
+const RIWAYAT_LOG_SHEET_NAME = '_RiwayatApp';
+const RIWAYAT_LOG_READ_RANGE = `'${RIWAYAT_LOG_SHEET_NAME}'!A2:C3000`;
+
 // Nama bulan Indonesia -> dipakai untuk menentukan nama sheet aktif otomatis
 const BULAN_ID = ['JAN','FEB','MAR','APR','MEI','JUN','JUL','AGTS','SEPT','OKT','NOV','DES'];
 const BULAN_ID_LONG = ['JANUARI','FEBRUARI','MARET','APRIL','MEI','JUNI','JULI','AGUSTUS','SEPTEMBER','OKTOBER','NOVEMBER','DESEMBER'];
@@ -57,6 +71,8 @@ const state = {
   sessionLog: [],
   cfEmailLog: [],
   riwayatTab: 'sheet', // tab aktif di halaman Riwayat: 'sheet' atau 'email'
+  riwayatLogSheetId: null,  // sheetId (gid) tab tersembunyi '_RiwayatApp', diisi begitu dicek/dibuat sekali per sesi
+  riwayatSyncing: false,
 
   // ---- Cek Fisik (email permohonan) ----
   cfToEmail: CF_TO_EMAIL_DEFAULT,
@@ -889,6 +905,7 @@ function parseCSV(text) {
       count: sorted.length,
       debit: sorted.length * 2,
       fakturRange: buildFakturRange(sorted),
+      hasGap: getFakturSegments(sorted).length > 1, // ada nomor yang melompat di tanggal ini -> tampilkan penanda
     });
   }
 
@@ -936,17 +953,63 @@ function padFakturNum(faktur) {
   return `${m[1].padStart(4, '0')}${m[2]}`;
 }
 
+/** Pecah daftar faktur (sudah terurut) jadi segmen-segmen [awal, akhir] yang benar-benar berurutan; lompatan/gap memutus jadi segmen baru. */
+function getFakturSegments(sortedFakturs) {
+  const nums = sortedFakturs.map(extractFakturNum);
+  const segments = [];
+  let segStart = nums[0];
+  let segEnd = nums[0];
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === segEnd + 1) {
+      segEnd = nums[i];
+    } else {
+      segments.push([segStart, segEnd]);
+      segStart = nums[i];
+      segEnd = nums[i];
+    }
+  }
+  segments.push([segStart, segEnd]);
+  return segments;
+}
+
+/**
+ * Bangun teks rentang nomor faktur untuk satu tanggal, MENAMPILKAN APA
+ * ADANYA — bukan cuma "nomor pertama - nomor terakhir".
+ *
+ * Kenapa ini penting: PIC kadang menginput faktur secara tidak berurutan
+ * (ada nomor yang kelompatan/kelewat di hari itu, baru menyusul/diperbaiki
+ * di hari lain). Kalau cuma ditampilkan sebagai satu rentang min-max
+ * (mis. "0092-0108"), nomor-nomor yang SEBENARNYA TIDAK ADA di hari itu
+ * (mis. 094-100 dan 106 yang justru tercatat di tanggal lain) ikut terlihat
+ * seolah-olah ada — dan sebaliknya, nomor yang SEBENARNYA ada di hari itu
+ * (mis. 0107) jadi tidak kelihatan jelas karena tenggelam di tengah
+ * rentang. Ini yang bikin PIC susah mengecek "faktur nomor sekian sudah
+ * kebaca belum" pas ada nomor yang melompat, dan lama-lama malah dikira
+ * hilang/tidak terbaca padahal sebenarnya sudah tercatat, hanya saja di
+ * segmen yang berbeda.
+ *
+ * Solusinya: deteksi rentang-rentang yang BENAR-BENAR berurutan saja
+ * (loncatan/gap otomatis memutus jadi segmen baru), lalu semua segmen
+ * ditampilkan sekaligus dipisah koma, mis.:
+ *   "0092-0093, 0101-0105, 0107-0108/PGR/VII/2026"
+ * bukan "0092-0108/PGR/VII/2026" yang menyamarkan lompatannya.
+ * Jumlah unit ("count") tetap dihitung dari jumlah faktur yang benar-benar
+ * ada, jadi selalu akurat — perbaikan ini murni soal transparansi ke PIC.
+ */
 function buildFakturRange(sortedFakturs) {
   if (!sortedFakturs.length) return '';
   if (sortedFakturs.length === 1) return padFakturNum(sortedFakturs[0]);
-  const first = sortedFakturs[0];
+
   const last = sortedFakturs[sortedFakturs.length - 1];
-  const firstNum = extractFakturNum(first);
-  const lastNum = extractFakturNum(last);
-  // ambil suffix (bagian setelah nomor pertama) dari faktur terakhir sebagai referensi format
   const suffixMatch = last.match(/^\d+(\/.*)$/);
   const suffix = suffixMatch ? suffixMatch[1] : '';
-  return `${String(firstNum).padStart(4, '0')}-${String(lastNum).padStart(4, '0')}${suffix}`;
+
+  const segments = getFakturSegments(sortedFakturs);
+  const segmentText = segments
+    .map(([s, e]) => (s === e ? String(s).padStart(4, '0') : `${String(s).padStart(4, '0')}-${String(e).padStart(4, '0')}`))
+    .join(', ');
+
+  return `${segmentText}${suffix}`;
 }
 
 /**
@@ -1379,6 +1442,11 @@ function renderPreview(days) {
       <div class="day-info">
         <div class="faktur-range">${day.fakturRange}</div>
         <div class="unit-count">${day.count} unit terjual${day.source === 'manual' ? ' · input cepat' : ''}</div>
+        ${day.hasGap ? `
+        <div class="faktur-gap-warn">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Ada nomor faktur yang melompat di tanggal ini — cek lagi rentangnya
+        </div>` : ''}
       </div>
       <div class="day-debit">-${day.debit}<small>pcs</small></div>
       <button class="preview-row-remove" data-idx="${idx}" aria-label="Hapus baris ini">
@@ -1963,12 +2031,14 @@ async function executeManualWrite(dateObj, faktur, credit) {
 }
 
 function logSession(type, desc) {
-  state.sessionLog.unshift({ type, desc, time: new Date() });
+  const entry = { id: genLogId(), type, desc, time: new Date() };
+  state.sessionLog.unshift(entry);
   if (state.sessionLog.length > SESSION_LOG_MAX_ENTRIES) {
     state.sessionLog.length = SESSION_LOG_MAX_ENTRIES;
   }
   saveSessionLog();
   renderSessionLog();
+  appendRiwayatLogRow('sheet', entry); // fire-and-forget: gagal pun riwayat lokal tetap aman
 }
 
 function saveSessionLog() {
@@ -2040,12 +2110,14 @@ function renderSessionLog() {
  * tab "Email Cek Fisik" di halaman Riwayat, tanpa perlu buka Gmail.
  */
 function logCfEmail(entry) {
-  state.cfEmailLog.unshift({ ...entry, time: new Date() });
+  const fullEntry = { id: genLogId(), ...entry, time: new Date() };
+  state.cfEmailLog.unshift(fullEntry);
   if (state.cfEmailLog.length > CF_EMAIL_LOG_MAX_ENTRIES) {
     state.cfEmailLog.length = CF_EMAIL_LOG_MAX_ENTRIES;
   }
   saveCfEmailLog();
   renderCfEmailLog();
+  appendRiwayatLogRow('email', fullEntry); // fire-and-forget: gagal pun riwayat lokal tetap aman
 }
 
 function saveCfEmailLog() {
@@ -2075,6 +2147,158 @@ function clearCfEmailLog() {
   localStorage.removeItem(STORAGE_KEYS.cfEmailLog);
   renderCfEmailLog();
   toast('Riwayat email berhasil dihapus.', 'success');
+}
+
+/* ---------------- Sinkronisasi Riwayat lintas perangkat (via tab tersembunyi di Sheets) ---------------- */
+
+/** ID unik pendek per entri riwayat, dipakai untuk gabungkan (dedupe) data lokal vs cloud saat sinkron. */
+function genLogId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * Pastikan tab tersembunyi '_RiwayatApp' ada di spreadsheet aktif. Dibuat
+ * otomatis sekali (tersembunyi dari tampilan normal Google Sheets, supaya
+ * tidak mengganggu tab-tab data cek fisik/gesek yang memang dipakai user).
+ * Hasil pengecekan disimpan di state.riwayatLogSheetId supaya tidak
+ * mengecek ulang berkali-kali dalam satu sesi.
+ */
+async function ensureRiwayatLogSheet() {
+  if (state.riwayatLogSheetId != null) return state.riwayatLogSheetId;
+
+  const meta = await getSpreadsheetMeta();
+  const existing = meta.sheets.find(s => s.properties.title === RIWAYAT_LOG_SHEET_NAME);
+  if (existing) {
+    state.riwayatLogSheetId = existing.properties.sheetId;
+    return state.riwayatLogSheetId;
+  }
+
+  const res = await sheetsFetch(`${state.spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify({
+      requests: [{
+        addSheet: {
+          properties: {
+            title: RIWAYAT_LOG_SHEET_NAME,
+            hidden: true,
+            gridProperties: { rowCount: 2000, columnCount: 3 },
+          },
+        },
+      }],
+    }),
+  });
+  state.riwayatLogSheetId = res.replies[0].addSheet.properties.sheetId;
+
+  // Baris header, murni buat dokumentasi kalau ada yang tidak sengaja membuka tabnya.
+  const headerRange = `'${RIWAYAT_LOG_SHEET_NAME}'!A1:C1`;
+  await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=RAW`, {
+    method: 'PUT',
+    body: JSON.stringify({ range: headerRange, values: [['waktu', 'tipe', 'data (JSON) — jangan diedit manual']] }),
+  });
+
+  return state.riwayatLogSheetId;
+}
+
+/**
+ * Kirim satu entri riwayat ke tab cloud. Dipanggil "fire-and-forget" (tanpa
+ * await) dari logSession/logCfEmail supaya tidak memperlambat alur utama —
+ * kalau gagal (offline, belum ada akses, dll), riwayat lokal tetap aman
+ * tersimpan dan akan tersinkron lagi lain kali berhasil.
+ */
+async function appendRiwayatLogRow(tipe, entry) {
+  try {
+    if (!state.spreadsheetId || !state.accessToken) return;
+    await ensureRiwayatLogSheet();
+    const row = [entry.time.toISOString(), tipe, JSON.stringify({ ...entry, time: entry.time.toISOString() })];
+    const range = `'${RIWAYAT_LOG_SHEET_NAME}'!A:C`;
+    await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW`, {
+      method: 'POST',
+      body: JSON.stringify({ values: [row] }),
+    });
+  } catch (e) {
+    console.error('Gagal menyalin riwayat ke cloud (riwayat lokal tetap aman):', e);
+  }
+}
+
+/** Ambil semua baris log dari cloud. Return null kalau gagal (bukan [] — beda arti: [] = berhasil tapi memang belum ada data). */
+async function fetchRiwayatLogRows() {
+  try {
+    if (!state.spreadsheetId || !state.accessToken) return null;
+    await ensureRiwayatLogSheet();
+    const res = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(RIWAYAT_LOG_READ_RANGE)}`);
+    return res.values || [];
+  } catch (e) {
+    console.error('Gagal memuat riwayat dari cloud, pakai data lokal saja:', e);
+    return null;
+  }
+}
+
+/**
+ * Gabungkan array riwayat lokal + baris mentah dari cloud jadi satu daftar,
+ * di-dedupe berdasarkan id (entri yang sama dari device manapun cuma
+ * dihitung sekali), lalu diurutkan terbaru dulu dan dipotong sesuai batas.
+ * Entri lokal lama dari SEBELUM fitur sinkron ini ada (belum punya id)
+ * tetap dipertahankan (tidak dibuang) — cuma tidak ikut logika dedupe.
+ */
+function mergeLogEntries(localArr, remoteRows, maxEntries) {
+  const map = new Map();
+  let noIdCounter = 0;
+
+  localArr.forEach(item => {
+    const key = item.id || `__noid_local_${noIdCounter++}`;
+    map.set(key, item);
+  });
+
+  (remoteRows || []).forEach(row => {
+    try {
+      const parsed = JSON.parse(row[2]);
+      if (parsed && parsed.time) {
+        const key = parsed.id || `__noid_remote_${noIdCounter++}`;
+        map.set(key, { ...parsed, time: new Date(parsed.time) });
+      }
+    } catch (e) {
+      // baris rusak/tidak bisa di-parse -> lewati diam-diam, jangan sampai bikin seluruh sinkronisasi gagal
+    }
+  });
+
+  const merged = Array.from(map.values());
+  merged.sort((a, b) => b.time - a.time);
+  return merged.slice(0, maxEntries);
+}
+
+/**
+ * Sinkronkan Riwayat (Tulis Sheet & Email Cek Fisik) dengan tab cloud.
+ * Dipanggil tiap kali halaman Riwayat dibuka: tampilan lokal (cache) sudah
+ * langsung kelihatan instan, lalu diam-diam disamakan dengan data cloud
+ * begitu berhasil diambil — supaya riwayat yang dibuat dari perangkat lain
+ * (mis. laptop) ikut muncul di HP, dan sebaliknya.
+ */
+async function syncRiwayatFromCloud() {
+  if (state.riwayatSyncing) return; // sudah ada proses sinkron berjalan, jangan dobel
+  if (!state.spreadsheetId || !state.accessToken) return; // belum siap (belum login/pilih sheet) -> lewati diam-diam
+
+  state.riwayatSyncing = true;
+  const indicator = $('#riwayatSyncStatus');
+  if (indicator) indicator.classList.add('show');
+
+  try {
+    const rows = await fetchRiwayatLogRows();
+    if (rows === null) return; // gagal ambil -> biarkan tampilan lokal apa adanya, jangan timpa apa-apa
+
+    const sheetRows = rows.filter(r => r[1] === 'sheet');
+    const emailRows = rows.filter(r => r[1] === 'email');
+
+    state.sessionLog = mergeLogEntries(state.sessionLog, sheetRows, SESSION_LOG_MAX_ENTRIES);
+    state.cfEmailLog = mergeLogEntries(state.cfEmailLog, emailRows, CF_EMAIL_LOG_MAX_ENTRIES);
+
+    saveSessionLog();
+    saveCfEmailLog();
+    renderSessionLog();
+    renderCfEmailLog();
+  } finally {
+    state.riwayatSyncing = false;
+    if (indicator) indicator.classList.remove('show');
+  }
 }
 
 function renderCfEmailLog() {
@@ -3065,6 +3289,7 @@ function setupBottomNav() {
       if (nav === 'riwayat') {
         renderSessionLog();
         renderCfEmailLog();
+        syncRiwayatFromCloud();
       } else if (nav === 'akun') {
         renderAkunPage();
       } else if (nav === 'cekfisik') {
