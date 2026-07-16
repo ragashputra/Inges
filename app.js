@@ -2094,10 +2094,11 @@ function renderCfEmailLog() {
         </div>
         <div class="day-info">
           <div class="faktur-range">${escapeHtml(item.kota || '—')} &middot; Via ${escapeHtml(item.via || '—')}</div>
+          ${item.periode ? `
           <div class="periode-tag">
             <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            ${escapeHtml(item.periode || '—')}
-          </div>
+            ${escapeHtml(item.periode)}
+          </div>` : ''}
           <div class="unit-count">${formatNum(item.totalLembar || 0)} lembar cek fisik &middot; Kepada ${escapeHtml(item.toEmail || '—')}</div>
         </div>
         <svg class="row-chevron" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2134,7 +2135,14 @@ function openEmailLogDetail(idx) {
   }
 
   $('#elogSubject').textContent = item.subject || '—';
-  $('#elogPeriode').textContent = item.periode || '—';
+  const periodeEl = $('#elogPeriode');
+  if (item.periode) {
+    periodeEl.textContent = item.periode;
+    periodeEl.classList.remove('meta-muted');
+  } else {
+    periodeEl.textContent = 'Tidak tercatat (email lama, sebelum fitur ini ada)';
+    periodeEl.classList.add('meta-muted');
+  }
   $('#elogBody').textContent = item.body || '—';
 
   openModal('#emailLogDetailModal');
