@@ -599,7 +599,14 @@ function buildSaldoFormula(rowNum, prevRowNum) {
  */
 async function loadSpreadsheetMeta() {
   const meta = await getSpreadsheetMeta();
-  const sheetNames = meta.sheets.map(s => s.properties.title);
+  // Sembunyikan sheet internal (mis. tab log '_RiwayatApp' yang dibuat hidden:true
+  // lewat API) dari daftar yang dipakai UI (modal pilih sheet, dropdown import, dst),
+  // supaya user tidak salah pencet. Dicek dua lapis: flag hidden dari Sheets API,
+  // DAN nama persis RIWAYAT_LOG_SHEET_NAME sebagai jaring pengaman kalau suatu saat
+  // flag hidden-nya tidak ikut kebawa/berubah.
+  const sheetNames = meta.sheets
+    .filter(s => !s.properties.hidden && s.properties.title !== RIWAYAT_LOG_SHEET_NAME)
+    .map(s => s.properties.title);
   state.spreadsheetLocale = meta.properties?.locale || null;
   state.formulaSep = formulaSeparatorForLocale(state.spreadsheetLocale);
   state.availableSheets = sheetNames;
