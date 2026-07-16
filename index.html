@@ -95,7 +95,15 @@
   color-scheme: light;
 }
 
-*{box-sizing:border-box; -webkit-tap-highlight-color:transparent; accent-color:var(--sage);}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+/* accent-color sengaja TIDAK ditaruh di selector * global lagi. Kalau accent-color
+   kena ke <select>, sebagian browser (terutama Chrome dark mode) sempat "kedip"
+   highlight/checkmark item terpilih pakai warna accent itu pas popup native
+   ditutup setelah user pilih opsi. Karena --sage di dark mode jauh lebih terang
+   (#A3B899) dibanding light mode (#5C7A54), kedipannya jadi jauh lebih kentara
+   di dark mode — makanya cuma kerasa di situ. Scope ke elemen yang memang butuh
+   warna accent (checkbox/radio/range/date), select sengaja dilewati. */
+input[type="checkbox"], input[type="radio"], input[type="range"], input[type="date"]{accent-color:var(--sage);}
 html,body{
   margin:0; padding:0; height:100%;
   background:var(--ink-0);
