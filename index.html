@@ -414,7 +414,7 @@ input[type=file]{display:none;}
 .day-date b{font-family:var(--font-display); font-size:16px; font-weight:700; line-height:1.1;}
 .day-date span{font-size:10px; color:var(--paper-faint); text-transform:uppercase; font-weight:700;}
 .day-info{flex:1; min-width:0;}
-.day-info .faktur-range{font-size:12px; font-weight:600; color:var(--paper-dim); overflow-wrap:break-word;}
+.day-info .faktur-range{font-size:12px; font-weight:600; color:var(--paper-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .day-info .faktur-gap-warn{
   display:flex; align-items:flex-start; gap:5px; margin-top:5px;
   font-size:10.5px; font-weight:600; line-height:1.35; color:var(--amber);
@@ -1272,7 +1272,7 @@ input[type=file]{display:none;}
           </h3>
 
           <!-- ---- Sub-tab: Tulis Sheet / Email Cek Fisik ---- -->
-          <div class="chip-select" id="riwayatSubTabs" style="margin-bottom:14px;">
+          <div class="chip-select" id="riwayatSubTabs" style="margin-top:14px; margin-bottom:14px;">
             <div class="chip-opt active" id="riwayatChipSheet" data-tab="sheet" data-desc="Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.">
               Tulis Sheet<span class="chip-count" id="riwayatSheetCount"></span>
             </div>
