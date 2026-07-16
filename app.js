@@ -2094,6 +2094,10 @@ function renderCfEmailLog() {
         </div>
         <div class="day-info">
           <div class="faktur-range">${escapeHtml(item.kota || '—')} &middot; Via ${escapeHtml(item.via || '—')}</div>
+          <div class="periode-tag">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            ${escapeHtml(item.periode || '—')}
+          </div>
           <div class="unit-count">${formatNum(item.totalLembar || 0)} lembar cek fisik &middot; Kepada ${escapeHtml(item.toEmail || '—')}</div>
         </div>
         <svg class="row-chevron" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2130,6 +2134,7 @@ function openEmailLogDetail(idx) {
   }
 
   $('#elogSubject').textContent = item.subject || '—';
+  $('#elogPeriode').textContent = item.periode || '—';
   $('#elogBody').textContent = item.body || '—';
 
   openModal('#emailLogDetailModal');
@@ -2514,7 +2519,7 @@ function toTitleCase(str) {
  * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
  */
 function setupCfUppercaseFields() {
-  ['cfNamaSO', 'cfNamaPengirim', 'cfKotaTujuan', 'cfVia'].forEach(id => {
+  ['cfNamaSO', 'cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
     const input = $('#' + id);
     if (!input) return;
     input.addEventListener('input', () => {
@@ -2526,6 +2531,20 @@ function setupCfUppercaseFields() {
       }
     });
   });
+
+  // Via biasanya singkatan (RRO, RO, SO, dst) jadi dipaksa HURUF BESAR
+  // semua, bukan Title Case — supaya "rro" otomatis jadi "RRO", bukan "Rro".
+  const viaInput = $('#cfVia');
+  if (viaInput) {
+    viaInput.addEventListener('input', () => {
+      const pos = viaInput.selectionStart;
+      const upper = viaInput.value.toUpperCase();
+      if (viaInput.value !== upper) {
+        viaInput.value = upper;
+        if (pos !== null) viaInput.setSelectionRange(pos, pos);
+      }
+    });
+  }
 }
 
 /** Render ulang page saat dibuka (nama SO/pengirim ikut isi terakhir yang tersimpan di form). */
@@ -2535,33 +2554,41 @@ function renderCekFisikPage() {
 }
 
 /* ---------------- Bangun teks surat & subjek ---------------- */
-function cfBuildSubject() {
-  const kota = $('#cfKotaTujuan').value.trim() || '—';
+/**
+ * Kelompokkan baris-baris bulan yang sudah diisi user jadi teks periode yang
+ * ringkas & enak dibaca, dikelompokkan per tahun kalau rentangnya melewati
+ * pergantian tahun. Dipakai baik untuk subjek email (cfBuildSubject) maupun
+ * untuk ringkasan periode di Riwayat Email Cek Fisik, supaya formatnya
+ * selalu sama persis di dua tempat itu.
+ *   1 bulan, 1 tahun   -> "Juli 2026"
+ *   2 bulan, 1 tahun   -> "Juli & Agustus 2026"
+ *   3+ bulan, 1 tahun  -> "Juni, Juli & Agustus 2026"
+ *   lintas tahun       -> "Desember 2025; Januari & Februari 2026"
+ */
+function buildPeriodeText(monthRows) {
+  const sortedRows = [...monthRows].sort((a, b) => (a.tahun - b.tahun) || (a.bulanIdx - b.bulanIdx));
 
-  // Urutkan baris bulan secara KRONOLOGIS (tahun lalu bulan) dulu -- bukan
-  // ikut urutan baris diisi di form -- baru digabung jadi teks periode.
-  // 1 bulan  -> "Juli 2026"
-  // 2 bulan  -> "Juli & Agustus 2026"
-  // 3+ bulan -> "Juni, Juli & Agustus 2026"
-  const sortedRows = [...state.cfMonthRows].sort((a, b) => (a.tahun - b.tahun) || (a.bulanIdx - b.bulanIdx));
-
-  const seen = new Set();
-  const monthNames = [];
+  const byYear = [];
   sortedRows.forEach(r => {
+    let group = byYear.find(g => g.tahun === r.tahun);
+    if (!group) { group = { tahun: r.tahun, monthNames: [], seen: new Set() }; byYear.push(group); }
     const name = bulanLongCapitalized(r.bulanIdx);
-    if (!seen.has(name)) { seen.add(name); monthNames.push(name); }
+    if (!group.seen.has(name)) { group.seen.add(name); group.monthNames.push(name); }
   });
 
-  const lastTahun = sortedRows.length ? sortedRows[sortedRows.length - 1].tahun : new Date().getFullYear();
+  const groupTexts = byYear.map(g => {
+    const months = g.monthNames.length === 1
+      ? g.monthNames[0]
+      : `${g.monthNames.slice(0, -1).join(', ')} & ${g.monthNames[g.monthNames.length - 1]}`;
+    return `${months} ${g.tahun}`;
+  });
 
-  let periodeMonths = '—';
-  if (monthNames.length === 1) {
-    periodeMonths = monthNames[0];
-  } else if (monthNames.length > 1) {
-    periodeMonths = `${monthNames.slice(0, -1).join(', ')} & ${monthNames[monthNames.length - 1]}`;
-  }
+  return groupTexts.length ? groupTexts.join('; ') : '—';
+}
 
-  const periodeText = monthNames.length ? `${periodeMonths} ${lastTahun}` : '—';
+function cfBuildSubject() {
+  const kota = $('#cfKotaTujuan').value.trim() || '—';
+  const periodeText = buildPeriodeText(state.cfMonthRows);
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
@@ -2717,6 +2744,7 @@ async function cfSendEmail() {
       body: cfBuildBody(),
       kota: $('#cfKotaTujuan').value.trim(),
       via: $('#cfVia').value.trim() || 'Ibu Lynda',
+      periode: buildPeriodeText(state.cfMonthRows),
       totalLembar: state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0),
     });
     cfResetForm();

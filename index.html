@@ -276,6 +276,17 @@ input,select,textarea{font-family:inherit;}
 }
 .month-pill svg{width:11px; height:11px; flex-shrink:0;}
 .month-pill.locked{color:var(--amber); background:rgba(212,162,76,0.12); border-color:rgba(212,162,76,0.3);}
+
+/* pill kecil "Periode: ..." di baris riwayat email cek fisik, biar bulan yang
+   diajukan langsung kelihatan tanpa perlu buka detail */
+.day-info .periode-tag{
+  display:inline-flex; align-items:center; gap:4px; max-width:100%;
+  font-size:10.5px; font-weight:700; color:var(--sage); font-family:inherit;
+  background:rgba(163,184,153,0.12); border:1px solid rgba(163,184,153,0.25);
+  padding:2px 8px; border-radius:var(--radius-full);
+  margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.day-info .periode-tag svg{width:10px; height:10px; flex-shrink:0;}
 .month-switch-btn{
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
   width:24px; height:24px; padding:0; border-radius:50%; border:none; cursor:pointer;
@@ -1164,22 +1175,22 @@ input[type=file]{display:none;}
          <div class="field-row">
            <div class="field">
              <label>Nama SO</label>
-             <input type="text" id="cfNamaSO" placeholder="Contoh: Budi Santoso">
+             <input type="text" id="cfNamaSO" placeholder="Cth: SO Dumai">
            </div>
            <div class="field">
              <label>Nama Pengirim</label>
-             <input type="text" id="cfNamaPengirim" placeholder="Contoh: Budi Santoso">
+             <input type="text" id="cfNamaPengirim" placeholder="Cth: Ragash">
            </div>
          </div>
 
          <div class="field-row">
            <div class="field">
              <label>Ke (Kota Tujuan)</label>
-             <input type="text" id="cfKotaTujuan" placeholder="Contoh: Pekanbaru">
+             <input type="text" id="cfKotaTujuan" placeholder="Cth: Pekanbaru">
            </div>
            <div class="field">
              <label>Via</label>
-             <input type="text" id="cfVia" placeholder="Contoh: Ibu Lynda RRO">
+             <input type="text" id="cfVia" placeholder="Cth: RRO">
            </div>
          </div>
 
@@ -1422,6 +1433,7 @@ input[type=file]{display:none;}
     <div class="email-preview-meta">
       <div class="email-preview-meta-row"><span>Kepada</span><span id="elogTo">—</span></div>
       <div class="email-preview-meta-row" id="elogCcRow"><span>CC</span><span id="elogCc">—</span></div>
+      <div class="email-preview-meta-row"><span>Periode</span><span id="elogPeriode">—</span></div>
       <div class="email-preview-meta-row"><span>Subjek</span><span id="elogSubject">—</span></div>
     </div>
 
