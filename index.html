@@ -1176,7 +1176,15 @@ input[type=file]{display:none;}
          <div class="field-row">
            <div class="field">
              <label>Nama SO</label>
-             <input type="text" id="cfNamaSO" placeholder="Cth: SO Dumai">
+             <div class="select-wrap">
+               <select id="cfNamaSO">
+                 <option value="" disabled selected>Pilih SO</option>
+                 <option value="SO">SO</option>
+                 <option value="KRO">KRO</option>
+                 <option value="RRO">RRO</option>
+                 <option value="HO">HO</option>
+               </select>
+             </div>
            </div>
            <div class="field">
              <label>Nama Pengirim</label>

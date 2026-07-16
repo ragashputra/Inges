@@ -2527,7 +2527,7 @@ function toTitleCase(str) {
  * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
  */
 function setupCfUppercaseFields() {
-  ['cfNamaSO', 'cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
+  ['cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
     const input = $('#' + id);
     if (!input) return;
     input.addEventListener('input', () => {
@@ -2620,7 +2620,7 @@ Kepada : MC Tax
 Head Office Medan
 
 Dengan hormat,
-Bersamaan dengan ini kami ajukan permohonan cek fisik untuk pengurusan surat-surat SMH ke ${kota} Via ${via} sebanyak ${totalLembar} Lembar cek fisik dengan rincian sebagai berikut :
+Bersamaan dengan ini kami ajukan permohonan cek fisik untuk pengurusan surat-surat SMH ke ${kota} via ${via} sebanyak ${totalLembar} Lembar cek fisik dengan rincian sebagai berikut :
 
 ${rincianLines}
 
