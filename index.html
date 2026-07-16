@@ -496,6 +496,20 @@ input[type=file]{display:none;}
 }
 .chip-opt.active{background:var(--sage); border-color:var(--sage); color:var(--ink-0);}
 .chip-opt:active{transform:scale(0.94);}
+.chip-count{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:16px; height:16px; padding:0 5px; margin-left:6px;
+  border-radius:var(--radius-full); font-size:10px; font-weight:800;
+  vertical-align:1px;
+}
+.chip-opt.active .chip-count{background:rgba(11,15,13,0.22); color:var(--ink-0);}
+.chip-opt:not(.active) .chip-count{background:rgba(124,135,124,0.18); color:var(--paper-faint);}
+.chip-count:empty{display:none;}
+
+/* ---------- riwayat: baris email cek fisik (bisa diketuk untuk detail) ---------- */
+.email-log-row{cursor:pointer;}
+.email-log-row:active{transform:scale(0.98); background:var(--ink-2);}
+.email-log-row .row-chevron{width:15px; height:15px; color:var(--paper-faint); flex-shrink:0;}
 
 .quick-preview-box{
   background:var(--ink-3); border:1px solid var(--line-soft); border-radius:var(--radius-sm);
@@ -1196,15 +1210,36 @@ input[type=file]{display:none;}
         <div class="card">
           <h3 class="card-title">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            Riwayat Terkirim
+            Riwayat
           </h3>
-          <p class="card-desc">Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.</p>
+
+          <!-- ---- Sub-tab: Tulis Sheet / Email Cek Fisik ---- -->
+          <div class="chip-select" id="riwayatSubTabs" style="margin-bottom:14px;">
+            <div class="chip-opt active" id="riwayatChipSheet" data-tab="sheet" data-desc="Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.">
+              Tulis Sheet<span class="chip-count" id="riwayatSheetCount"></span>
+            </div>
+            <div class="chip-opt" id="riwayatChipEmail" data-tab="email" data-desc="Email permohonan cek fisik yang berhasil dikirim. Ketuk salah satu untuk lihat detail lengkapnya.">
+              Email Cek Fisik<span class="chip-count" id="riwayatEmailCount"></span>
+            </div>
+          </div>
+          <p class="card-desc" id="riwayatSubDesc">Input yang berhasil ditulis ke Google Sheets. Tersimpan di perangkat ini sampai dihapus manual.</p>
+
+          <!-- ---- SUB: Riwayat Tulis Sheet ---- -->
           <div id="riwayatList">
             <div class="empty">
               <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <p>Belum ada input yang tercatat.</p>
             </div>
           </div>
+
+          <!-- ---- SUB: Riwayat Email Cek Fisik ---- -->
+          <div id="riwayatEmailList" class="hidden">
+            <div class="empty">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <p>Belum ada email cek fisik yang terkirim.</p>
+            </div>
+          </div>
+
           <button class="btn-danger" style="margin-top:14px;" id="btnClearHistory">
             <svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Hapus Riwayat
@@ -1373,6 +1408,26 @@ input[type=file]{display:none;}
       <span id="cfBtnSendLabel">Kirim Email Sekarang</span>
     </button>
     <button class="btn-secondary" style="margin-top:10px;" id="cfBtnPreviewBack">Kembali &amp; Edit</button>
+  </div>
+</div>
+
+<!-- ============ MODAL: DETAIL EMAIL CEK FISIK TERKIRIM ============ -->
+<div class="modal-backdrop" id="emailLogDetailModal">
+  <div class="modal-sheet">
+    <button class="modal-close-btn" data-close-modal="emailLogDetailModal" aria-label="Tutup"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Detail Email Terkirim</h3>
+    <p class="modal-sub">Dikirim <b id="elogSentAt">—</b>. Ini salinan yang tersimpan di perangkat ini, bukan status terkini dari kotak masuk penerima.</p>
+
+    <div class="email-preview-meta">
+      <div class="email-preview-meta-row"><span>Kepada</span><span id="elogTo">—</span></div>
+      <div class="email-preview-meta-row" id="elogCcRow"><span>CC</span><span id="elogCc">—</span></div>
+      <div class="email-preview-meta-row"><span>Subjek</span><span id="elogSubject">—</span></div>
+    </div>
+
+    <div class="email-preview" id="elogBody">—</div>
+
+    <button class="btn-secondary" id="elogBtnClose" data-close-modal="emailLogDetailModal">Tutup</button>
   </div>
 </div>
 

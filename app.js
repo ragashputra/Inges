@@ -18,12 +18,14 @@ const STORAGE_KEYS = {
   token: 'inges_gtoken',
   tokenExp: 'inges_gtoken_exp',
   sessionLog: 'inges_session_log',
+  cfEmailLog: 'inges_cf_email_log',        // riwayat email permohonan cek fisik yang berhasil terkirim
   lockedSheet: 'inges_locked_sheet',       // nama sheet bulan yang dikunci manual oleh user
   lockedFakturSuffix: 'inges_locked_faktur_suffix', // kode faktur (mis. PGR/VII/2026) yang dikunci manual
   hadSession: 'inges_had_session',         // penanda "pernah login sebelumnya" - dipakai buat auto-relogin diam-diam
 };
 
-const SESSION_LOG_MAX_ENTRIES = 200; // batas biar localStorage tidak membengkak tak terbatas
+const SESSION_LOG_MAX_ENTRIES = 200;   // batas biar localStorage tidak membengkak tak terbatas
+const CF_EMAIL_LOG_MAX_ENTRIES = 100;  // batas riwayat email cek fisik yang disimpan di perangkat
 
 // Nama bulan Indonesia -> dipakai untuk menentukan nama sheet aktif otomatis
 const BULAN_ID = ['JAN','FEB','MAR','APR','MEI','JUN','JUL','AGTS','SEPT','OKT','NOV','DES'];
@@ -53,6 +55,8 @@ const state = {
   pendingWriteMatches: null, // Map index entri -> nomor baris lama yang akan ditimpa (anti-duplikat)
   activeTab: 'import',
   sessionLog: [],
+  cfEmailLog: [],
+  riwayatTab: 'sheet', // tab aktif di halaman Riwayat: 'sheet' atau 'email'
 
   // ---- Cek Fisik (email permohonan) ----
   cfToEmail: CF_TO_EMAIL_DEFAULT,
@@ -2022,8 +2026,166 @@ function renderSessionLog() {
   const riwayatList = $('#riwayatList');
   if (riwayatList) riwayatList.innerHTML = listHTML;
 
-  const btnClear = $('#btnClearHistory');
-  if (btnClear) btnClear.classList.toggle('hidden', state.sessionLog.length === 0);
+  const countEl = $('#riwayatSheetCount');
+  if (countEl) countEl.textContent = state.sessionLog.length ? String(state.sessionLog.length) : '';
+
+  updateClearHistoryBtnVisibility();
+}
+
+/* ---------------- Riwayat Email Cek Fisik ---------------- */
+/**
+ * Dipanggil sesaat setelah email permohonan cek fisik berhasil dikirim
+ * (lihat cfSendEmail). Menyimpan salinan lengkapnya (penerima, cc, subjek,
+ * body, ringkasan kota/via/total lembar) supaya bisa dilihat lagi lewat
+ * tab "Email Cek Fisik" di halaman Riwayat, tanpa perlu buka Gmail.
+ */
+function logCfEmail(entry) {
+  state.cfEmailLog.unshift({ ...entry, time: new Date() });
+  if (state.cfEmailLog.length > CF_EMAIL_LOG_MAX_ENTRIES) {
+    state.cfEmailLog.length = CF_EMAIL_LOG_MAX_ENTRIES;
+  }
+  saveCfEmailLog();
+  renderCfEmailLog();
+}
+
+function saveCfEmailLog() {
+  try {
+    // Date tidak bisa di-JSON.stringify langsung sebagai Date lagi, jadi disimpan sebagai ISO string
+    const serializable = state.cfEmailLog.map(item => ({ ...item, time: item.time.toISOString() }));
+    localStorage.setItem(STORAGE_KEYS.cfEmailLog, JSON.stringify(serializable));
+  } catch (e) {
+    console.error('Gagal menyimpan riwayat email cek fisik:', e);
+  }
+}
+
+function loadCfEmailLog() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.cfEmailLog);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    state.cfEmailLog = parsed.map(item => ({ ...item, time: new Date(item.time) }));
+  } catch (e) {
+    console.error('Gagal memuat riwayat email cek fisik:', e);
+    state.cfEmailLog = [];
+  }
+}
+
+function clearCfEmailLog() {
+  state.cfEmailLog = [];
+  localStorage.removeItem(STORAGE_KEYS.cfEmailLog);
+  renderCfEmailLog();
+  toast('Riwayat email berhasil dihapus.', 'success');
+}
+
+function renderCfEmailLog() {
+  const emptyHTML = `
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p>Belum ada email cek fisik yang terkirim.</p>
+    </div>`;
+
+  const bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  const listHTML = state.cfEmailLog.length
+    ? state.cfEmailLog.map((item, idx) => `
+      <div class="day-row email-log-row" data-idx="${idx}" style="margin-bottom:8px;">
+        <div class="day-date">
+          <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
+          <span>${item.time.getDate()} ${bulanSingkat[item.time.getMonth()]}</span>
+        </div>
+        <div class="day-info">
+          <div class="faktur-range">${escapeHtml(item.kota || '—')} &middot; Via ${escapeHtml(item.via || '—')}</div>
+          <div class="unit-count">${formatNum(item.totalLembar || 0)} lembar cek fisik &middot; Kepada ${escapeHtml(item.toEmail || '—')}</div>
+        </div>
+        <svg class="row-chevron" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    `).join('')
+    : emptyHTML;
+
+  const listEl = $('#riwayatEmailList');
+  if (listEl) listEl.innerHTML = listHTML;
+
+  const countEl = $('#riwayatEmailCount');
+  if (countEl) countEl.textContent = state.cfEmailLog.length ? String(state.cfEmailLog.length) : '';
+
+  updateClearHistoryBtnVisibility();
+}
+
+/** Tampilkan detail lengkap satu email dari riwayat (read-only, tanpa aksi kirim ulang). */
+function openEmailLogDetail(idx) {
+  const item = state.cfEmailLog[idx];
+  if (!item) return;
+
+  const bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  const d = item.time;
+  $('#elogSentAt').textContent = `${d.getDate()} ${bulanSingkat[d.getMonth()]} ${d.getFullYear()}, ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+
+  $('#elogTo').textContent = item.toEmail || '—';
+
+  const ccRow = $('#elogCcRow');
+  if (item.ccEmails && item.ccEmails.length) {
+    ccRow.classList.remove('hidden');
+    $('#elogCc').textContent = item.ccEmails.join(', ');
+  } else {
+    ccRow.classList.add('hidden');
+  }
+
+  $('#elogSubject').textContent = item.subject || '—';
+  $('#elogBody').textContent = item.body || '—';
+
+  openModal('#emailLogDetailModal');
+}
+
+/** Klik baris mana pun di daftar riwayat email (event delegation) -> buka detailnya. */
+function setupRiwayatEmailDetail() {
+  const listEl = $('#riwayatEmailList');
+  if (!listEl) return;
+  listEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.email-log-row');
+    if (!row) return;
+    openEmailLogDetail(parseInt(row.dataset.idx, 10));
+  });
+}
+
+/**
+ * Sinkronkan tampilan/label tombol "Hapus Riwayat" dengan tab yang sedang
+ * aktif di halaman Riwayat -- tombol hilang kalau daftar tab aktif kosong,
+ * dan yang dihapus cuma riwayat tab yang sedang dilihat, bukan keduanya
+ * sekaligus (biar tidak ada kejadian "Hapus Riwayat" nge-hapus data yang
+ * sedang tidak dilihat orangnya).
+ */
+function updateClearHistoryBtnVisibility() {
+  const btn = $('#btnClearHistory');
+  if (!btn) return;
+  const activeLen = state.riwayatTab === 'email' ? state.cfEmailLog.length : state.sessionLog.length;
+  btn.classList.toggle('hidden', activeLen === 0);
+}
+
+/** Sub-tab "Tulis Sheet" vs "Email Cek Fisik" di halaman Riwayat. */
+function setupRiwayatTabs() {
+  const chipSheet = $('#riwayatChipSheet');
+  const chipEmail = $('#riwayatChipEmail');
+  const listSheet = $('#riwayatList');
+  const listEmail = $('#riwayatEmailList');
+  const desc = $('#riwayatSubDesc');
+  if (!chipSheet || !chipEmail || !listSheet || !listEmail) return;
+
+  const activate = (tab) => {
+    state.riwayatTab = tab;
+    const isEmail = tab === 'email';
+    chipEmail.classList.toggle('active', isEmail);
+    chipSheet.classList.toggle('active', !isEmail);
+    listEmail.classList.toggle('hidden', !isEmail);
+    listSheet.classList.toggle('hidden', isEmail);
+    const activeChip = isEmail ? chipEmail : chipSheet;
+    if (desc && activeChip.dataset.desc) desc.textContent = activeChip.dataset.desc;
+    updateClearHistoryBtnVisibility();
+  };
+
+  chipSheet.addEventListener('click', () => activate('sheet'));
+  chipEmail.addEventListener('click', () => activate('email'));
+
+  // Teks deskripsi & tab aktif disamakan dengan chip yang ber-class "active" di HTML saat pertama dimuat.
+  activate(chipEmail.classList.contains('active') ? 'email' : 'sheet');
 }
 
 /* =========================================================================
@@ -2407,7 +2569,7 @@ function cfBuildBody() {
   const namaSO = $('#cfNamaSO').value.trim() || 'NAMA SO';
   const namaPengirim = $('#cfNamaPengirim').value.trim() || 'NAMA PENGIRIM';
   const kota = $('#cfKotaTujuan').value.trim() || 'Kota Tujuan';
-  const via = $('#cfVia').value.trim() || 'Via';
+  const via = $('#cfVia').value.trim() || 'Ibu Lynda';
   const tanggal = formatTanggalSuratHariIni();
   const totalLembar = state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0);
 
@@ -2548,6 +2710,15 @@ async function cfSendEmail() {
 
     closeModal('#cfPreviewModal');
     toast('Email permohonan cek fisik berhasil dikirim.', 'success', 3600);
+    logCfEmail({
+      toEmail,
+      ccEmails,
+      subject,
+      body: cfBuildBody(),
+      kota: $('#cfKotaTujuan').value.trim(),
+      via: $('#cfVia').value.trim() || 'Ibu Lynda',
+      totalLembar: state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0),
+    });
     cfResetForm();
   } catch (err) {
     console.error(err);
@@ -2732,11 +2903,20 @@ function setupModals() {
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') closeModal('#confirmModal'); });
 
   $('#btnClearHistory').addEventListener('click', () => {
+    if (state.riwayatTab === 'email') {
+      if (!state.cfEmailLog.length) { toast('Riwayat email sudah kosong.', 'success', 1800); return; }
+      if (confirm('Hapus semua riwayat email cek fisik yang tersimpan di perangkat ini? Tindakan ini tidak bisa dibatalkan.')) {
+        clearCfEmailLog();
+      }
+      return;
+    }
     if (!state.sessionLog.length) { toast('Riwayat sudah kosong.', 'success', 1800); return; }
     if (confirm('Hapus semua riwayat yang tersimpan di perangkat ini? Tindakan ini tidak bisa dibatalkan.')) {
       clearSessionLog();
     }
   });
+
+  $('#elogBtnClose').addEventListener('click', () => closeModal('#emailLogDetailModal'));
 
   setupSheetIdAutoclean();
 
@@ -2838,6 +3018,7 @@ function setupBottomNav() {
       setActivePage(nav);
       if (nav === 'riwayat') {
         renderSessionLog();
+        renderCfEmailLog();
       } else if (nav === 'akun') {
         renderAkunPage();
       } else if (nav === 'cekfisik') {
@@ -2925,6 +3106,10 @@ function init() {
   updateManualFakturPlaceholder();
   loadSessionLog();
   renderSessionLog();
+  loadCfEmailLog();
+  renderCfEmailLog();
+  setupRiwayatTabs();
+  setupRiwayatEmailDetail();
   initGoogleAuth();
 
   if ('serviceWorker' in navigator) {
