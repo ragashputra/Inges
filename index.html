@@ -332,11 +332,6 @@ input,select,textarea{font-family:inherit;}
 .day-info .periode-tag svg{width:10px; height:10px; flex-shrink:0;}
 .email-preview-meta-row .meta-muted{font-style:italic; color:var(--paper-faint); font-weight:500;}
 
-/* baris gabungan "Nama Area/Unit Usaha": dropdown kategori (SO/KRO/RRO/HO) + input nama tempat, sejajar */
-.cf-nama-so-row{display:flex; gap:8px;}
-.cf-nama-so-row .cf-nama-so-select{flex:0 0 96px;}
-.cf-nama-so-row input{flex:1; min-width:0;}
-
 /* indikator kecil "Menyinkronkan..." di judul halaman Riwayat, muncul sesaat
    selagi riwayat disamakan dengan tab cloud (lihat syncRiwayatFromCloud) */
 .riwayat-sync-status{
@@ -1160,7 +1155,6 @@ input[type=file]{display:none;}
               <div class="field">
                 <label>No. Faktur Awal</label>
                 <input type="text" id="quickFakturStart" placeholder="Contoh: 1" inputmode="numeric" maxlength="4" pattern="[0-9]{1,4}">
-                <div class="field-hint">Otomatis dilengkapi jadi 4 digit (mis. 1 &rarr; 0001)</div>
               </div>
             </div>
 
@@ -1304,18 +1298,11 @@ input[type=file]{display:none;}
          <!-- ---- Data Pengirim ---- -->
          <div class="field-row">
            <div class="field">
-             <label>Nama Area/ Unit Usaha</label>
-             <div class="cf-nama-so-row">
-               <div class="select-wrap cf-nama-so-select">
-                 <select id="cfNamaSO">
-                   <option value="" disabled selected>Pilih</option>
-                   <option value="SO">SO</option>
-                   <option value="KRO">KRO</option>
-                   <option value="RRO">RRO</option>
-                   <option value="HO">HO</option>
-                 </select>
-               </div>
-               <input type="text" id="cfNamaSOText" placeholder="Cth: Pinggir">
+             <label>Nama Unit Usaha</label>
+             <div class="select-wrap">
+               <select id="cfNamaSO">
+                 <option value="" disabled selected>Pilih</option>
+               </select>
              </div>
            </div>
          </div>
@@ -1326,15 +1313,31 @@ input[type=file]{display:none;}
              <input type="text" id="cfNamaPengirim" placeholder="Cth: Ragash">
            </div>
            <div class="field">
-             <label>Ke (Kota Tujuan)</label>
+             <label>Kota Pengurusan</label>
              <input type="text" id="cfKotaTujuan" placeholder="Cth: Pekanbaru">
            </div>
          </div>
 
          <div class="field-row">
            <div class="field">
-             <label>Via</label>
-             <input type="text" id="cfVia" placeholder="Cth: RRO">
+             <label>Nama Pengurusan</label>
+             <div class="select-wrap">
+               <select id="cfViaKategori">
+                 <option value="" disabled selected>Pilih</option>
+                 <option value="RRO">RRO</option>
+                 <option value="SO">SO</option>
+               </select>
+             </div>
+           </div>
+         </div>
+         <div class="field-row hidden" id="cfViaSOWrap">
+           <div class="field">
+             <label>Pilih Unit Usaha</label>
+             <div class="select-wrap">
+               <select id="cfViaSO">
+                 <option value="" disabled selected>Pilih</option>
+               </select>
+             </div>
            </div>
          </div>
 

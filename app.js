@@ -13,6 +13,19 @@ const CF_TO_EMAIL_DEFAULT = 'blanko_fin@cdn.co.id';
 const CF_DEFAULT_CC = ['lynda@cdn.co.id'];
 const PCS_PER_UNIT = 2; // 1 unit SMH = 2 lembar cek fisik
 
+// Daftar kode SO (Sales/Service Outlet) -- dipakai buat isi dropdown "Nama Unit
+// Usaha" DAN dropdown "Pilih Unit Usaha" (di bawah "Nama Pengurusan" saat
+// pilihannya SO). Satu sumber data supaya kalau daftarnya berubah lagi nanti,
+// cukup diedit di satu tempat ini saja.
+const SO_UNIT_LIST = [
+  'SO UBT', 'SO LGS', 'SO DRI', 'SO BKG', 'SO PKC', 'SO MKG', 'SO BBT', 'SO BNA',
+  'SO LSM', 'SO UJT', 'SO ARK', 'SO KAN', 'SO MBO', 'SO AMK', 'SO GRG', 'SO PRW',
+  'SO TKN', 'SO SRM', 'SO FLB', 'SO TBH', 'SO LPK', 'SO KTC', 'SO PGR', 'SO SGL',
+  'SO ALB', 'SO DMI', 'SO SPP', 'SO JNB', 'SO BDS', 'SO BKJ', 'SO SDR', 'SO TBS',
+  'SO BKN', 'SO PJD', 'SO TDB', 'SO BNN', 'SO SLP', 'SO SBS', 'SO AGL', 'SO TTN',
+  'SO SKH', 'SO TBN', 'SO BTC', 'SO KPR', 'SO SPK', 'SO TPI', 'SO SML', 'SO NTN',
+];
+
 const STORAGE_KEYS = {
   sheetId: 'inges_sheet_id',
   token: 'inges_gtoken',
@@ -3024,9 +3037,11 @@ function toTitleCase(str) {
 /**
  * Paksa isian jadi Title Case otomatis sambil diketik, sambil menjaga
  * posisi kursor tetap di tempat semula (bukan lompat ke akhir teks).
+ * ("Nama Unit Usaha" & "Nama Pengurusan" sekarang dropdown, jadi tidak
+ * perlu lagi dipaksa Title Case/UPPERCASE di sini.)
  */
 function setupCfUppercaseFields() {
-  ['cfNamaSOText', 'cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
+  ['cfNamaPengirim', 'cfKotaTujuan'].forEach(id => {
     const input = $('#' + id);
     if (!input) return;
     input.addEventListener('input', () => {
@@ -3038,26 +3053,43 @@ function setupCfUppercaseFields() {
       }
     });
   });
-
-  // Via biasanya singkatan (RRO, RO, SO, dst) jadi dipaksa HURUF BESAR
-  // semua, bukan Title Case — supaya "rro" otomatis jadi "RRO", bukan "Rro".
-  const viaInput = $('#cfVia');
-  if (viaInput) {
-    viaInput.addEventListener('input', () => {
-      const pos = viaInput.selectionStart;
-      const upper = viaInput.value.toUpperCase();
-      if (viaInput.value !== upper) {
-        viaInput.value = upper;
-        if (pos !== null) viaInput.setSelectionRange(pos, pos);
-      }
-    });
-  }
 }
 
 /** Render ulang page saat dibuka (nama SO/pengirim ikut isi terakhir yang tersimpan di form). */
 function renderCekFisikPage() {
   // tidak ada fetch data — cukup pastikan minimal 1 baris bulan ada
   if (state.cfMonthRows.length === 0) cfAddMonthRow();
+}
+
+/**
+ * Isi opsi dropdown "Nama Unit Usaha" & "Pilih Unit Usaha" (di bawah Nama
+ * Pengurusan -> SO) dari satu daftar SO_UNIT_LIST yang sama, supaya kedua
+ * dropdown itu selalu konsisten kalau daftarnya diubah di kemudian hari.
+ */
+function populateSoDropdowns() {
+  const optionsHTML = SO_UNIT_LIST.map(so => `<option value="${so}">${so}</option>`).join('');
+  ['cfNamaSO', 'cfViaSO'].forEach(id => {
+    const select = $('#' + id);
+    if (!select) return;
+    select.innerHTML = `<option value="" disabled selected>Pilih</option>${optionsHTML}`;
+  });
+}
+
+/**
+ * "Nama Pengurusan" -> pilih RRO (langsung final) atau SO (perlu pilih lagi
+ * unit usahanya lewat dropdown kedua yang baru muncul).
+ */
+function setupCfViaKategori() {
+  const kategoriEl = $('#cfViaKategori');
+  const soWrap = $('#cfViaSOWrap');
+  const soSelect = $('#cfViaSO');
+  if (!kategoriEl || !soWrap) return;
+
+  kategoriEl.addEventListener('change', () => {
+    const isSo = kategoriEl.value === 'SO';
+    soWrap.classList.toggle('hidden', !isSo);
+    if (!isSo && soSelect) soSelect.value = '';
+  });
 }
 
 /* ---------------- Bangun teks surat & subjek ---------------- */
@@ -3099,19 +3131,23 @@ function cfBuildSubject() {
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
-/** Gabungkan kategori (SO/KRO/RRO/HO) + nama Area/Unit Usaha jadi satu string, mis. "SO Pinggir". */
+/** Nilai dropdown "Nama Unit Usaha" apa adanya, mis. "SO PGR". */
 function cfNamaSOFull() {
-  const kategori = $('#cfNamaSO').value.trim();
-  const nama = $('#cfNamaSOText').value.trim();
-  if (kategori && nama) return `${kategori} ${nama}`;
-  return kategori || nama || 'NAMA AREA/UNIT USAHA';
+  return $('#cfNamaSO').value.trim() || 'NAMA UNIT USAHA';
+}
+
+/** Gabungkan "Nama Pengurusan": RRO langsung dipakai, SO ambil dari dropdown kedua (mis. "SO PGR"). */
+function cfViaFull() {
+  const kategori = $('#cfViaKategori').value.trim();
+  if (kategori === 'SO') return $('#cfViaSO').value.trim() || 'SO';
+  return kategori;
 }
 
 function cfBuildBody() {
   const namaSO = cfNamaSOFull();
   const namaPengirim = $('#cfNamaPengirim').value.trim() || 'NAMA PENGIRIM';
   const kota = $('#cfKotaTujuan').value.trim() || 'Kota Tujuan';
-  const via = $('#cfVia').value.trim() || 'Ibu Lynda';
+  const via = cfViaFull() || 'Ibu Lynda';
   const tanggal = formatTanggalSuratHariIni();
   const totalLembar = state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0);
 
@@ -3142,11 +3178,12 @@ function cfValidateForm() {
   if (state.cfToEditing) errors.push('Selesaikan dulu (centang ✓) edit alamat Kepada sebelum mengirim.');
   if (state.cfCcList.some(c => c.editing)) errors.push('Selesaikan dulu (centang ✓) edit alamat CC sebelum mengirim.');
   if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
-  if (!$('#cfNamaSO').value.trim()) errors.push('Kategori Area/Unit Usaha (SO/KRO/RRO/HO) belum dipilih.');
-  if (!$('#cfNamaSOText').value.trim()) errors.push('Nama Area/Unit Usaha belum diisi.');
+  if (!$('#cfNamaSO').value.trim()) errors.push('Nama Unit Usaha belum dipilih.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
-  if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota tujuan belum diisi.');
-  if (!$('#cfVia').value.trim()) errors.push('Via belum diisi.');
+  if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota Pengurusan belum diisi.');
+  const viaKategori = $('#cfViaKategori').value.trim();
+  if (!viaKategori) errors.push('Nama Pengurusan belum dipilih.');
+  if (viaKategori === 'SO' && !$('#cfViaSO').value.trim()) errors.push('Unit usaha untuk Nama Pengurusan (SO) belum dipilih.');
   if (state.cfMonthRows.length === 0) errors.push('Tambahkan minimal satu baris bulan.');
   const hasValidUnit = state.cfMonthRows.some(r => (parseInt(r.unit, 10) || 0) > 0);
   if (!hasValidUnit) errors.push('Isi jumlah unit di minimal satu baris bulan.');
@@ -3259,7 +3296,7 @@ async function cfSendEmail() {
       subject,
       body: cfBuildBody(),
       kota: $('#cfKotaTujuan').value.trim(),
-      via: $('#cfVia').value.trim() || 'Ibu Lynda',
+      via: cfViaFull() || 'Ibu Lynda',
       periode: buildPeriodeText(state.cfMonthRows),
       totalLembar: state.cfMonthRows.reduce((sum, r) => sum + (parseInt(r.unit, 10) || 0) * PCS_PER_UNIT, 0),
     });
@@ -3275,10 +3312,11 @@ async function cfSendEmail() {
 /** Bersihkan form setelah email berhasil terkirim, siap dipakai untuk permohonan berikutnya. */
 function cfResetForm() {
   $('#cfNamaSO').value = '';
-  $('#cfNamaSOText').value = '';
   $('#cfNamaPengirim').value = '';
   $('#cfKotaTujuan').value = '';
-  $('#cfVia').value = '';
+  $('#cfViaKategori').value = '';
+  $('#cfViaSO').value = '';
+  $('#cfViaSOWrap').classList.add('hidden');
   state.cfMonthRows = [];
   cfAddMonthRow();
   state.cfToEmail = CF_TO_EMAIL_DEFAULT;
@@ -3289,6 +3327,8 @@ function cfResetForm() {
 }
 
 function setupCekFisikPage() {
+  populateSoDropdowns();
+  setupCfViaKategori();
   setupCfToRow();
   setupCfRecipients();
   setupCfMonthRows();
