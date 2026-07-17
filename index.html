@@ -539,6 +539,7 @@ input[type=file]{display:none;}
 /* ---------- form (manual credit) ---------- */
 .field{margin-bottom:14px;}
 .field label{display:block; font-size:12px; font-weight:700; color:var(--paper-dim); margin-bottom:7px; text-transform:uppercase; letter-spacing:0.03em;}
+.field-hint{font-size:10.5px; color:var(--paper-faint); margin-top:6px; line-height:1.4;}
 .field-label-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
 .field-label-row label{margin-bottom:7px;}
 .field-lock-btn{
@@ -1158,7 +1159,8 @@ input[type=file]{display:none;}
               </div>
               <div class="field">
                 <label>No. Faktur Awal</label>
-                <input type="text" id="quickFakturStart" placeholder="Contoh: 0252" inputmode="numeric" maxlength="4" pattern="[0-9]{4}">
+                <input type="text" id="quickFakturStart" placeholder="Contoh: 1" inputmode="numeric" maxlength="4" pattern="[0-9]{1,4}">
+                <div class="field-hint">Otomatis dilengkapi jadi 4 digit (mis. 1 &rarr; 0001)</div>
               </div>
             </div>
 

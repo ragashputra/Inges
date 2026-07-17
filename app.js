@@ -1300,6 +1300,16 @@ function setupQuickEntry() {
     if (cleaned !== fakturStartEl.value) fakturStartEl.value = cleaned;
   });
 
+  // Begitu selesai isi (blur/pindah field) & belum genap 4 digit, otomatis
+  // dilengkapi nol di depan -- user cukup ketik angkanya saja (mis. "1" jadi
+  // "0001", "20" jadi "0020"), tidak perlu mikirin nol di depan sendiri.
+  fakturStartEl.addEventListener('blur', () => {
+    if (fakturStartEl.value.length > 0 && fakturStartEl.value.length < 4) {
+      fakturStartEl.value = fakturStartEl.value.padStart(4, '0');
+      revalidate();
+    }
+  });
+
   // kalau kode faktur lagi terkunci, tetap kasih tahu kenapa nggak bisa
   // diketik alih-alih diem aja seolah rusak — dorong perhatian ke tombol gembok.
   suffixEl.addEventListener('focus', () => {
@@ -1321,8 +1331,10 @@ function setupQuickEntry() {
     // selagi dikunci, ikutin terus perubahan yang diketik user
     if (suffixLocked) localStorage.setItem(STORAGE_KEYS.lockedFakturSuffix, suffix);
 
-    // no. faktur awal wajib persis 4 digit angka
-    const fakturStartValid = /^\d{4}$/.test(fakturStartRaw);
+    // no. faktur awal cukup 1-4 digit angka -- nol di depan otomatis dilengkapi
+    // sendiri (lihat listener 'blur' di atas), jadi di sini tidak perlu
+    // memaksa user sudah mengetik persis 4 digit penuh dari awal.
+    const fakturStartValid = /^\d{1,4}$/.test(fakturStartRaw);
     const valid = dateVal && unitCount > 0 && fakturStartValid && suffix.length > 0;
     btnAdd.disabled = !valid;
 
