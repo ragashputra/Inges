@@ -80,6 +80,10 @@ const state = {
   cfCcList: [],        // [{email, editing}] - default CC dari CF_DEFAULT_CC
   cfMonthRows: [],      // [{id, bulanIdx(0-11), tahun, unit}]
   cfMonthRowSeq: 0,
+
+  // ---- Notifikasi ----
+  notifItems: [],          // hasil hitung terakhir: [{id, tone, icon, title, desc, action}]
+  notifGapChecked: false,  // true kalau scan faktur-lompat sudah pernah dijalankan sesi ini
 };
 
 /* ---------------- DOM SHORTCUTS ---------------- */
@@ -599,11 +603,11 @@ function buildSaldoFormula(rowNum, prevRowNum) {
  */
 async function loadSpreadsheetMeta() {
   const meta = await getSpreadsheetMeta();
-  // Sembunyikan sheet internal (mis. tab log '_RiwayatApp' yang dibuat hidden:true
-  // lewat API) dari daftar yang dipakai UI (modal pilih sheet, dropdown import, dst),
-  // supaya user tidak salah pencet. Dicek dua lapis: flag hidden dari Sheets API,
-  // DAN nama persis RIWAYAT_LOG_SHEET_NAME sebagai jaring pengaman kalau suatu saat
-  // flag hidden-nya tidak ikut kebawa/berubah.
+  // Sheet yang di-hide manual di Google Sheets (properties.hidden === true),
+  // maupun tab internal '_RiwayatApp' (penyimpanan log riwayat, bukan sheet
+  // rekap bulanan), sengaja TIDAK ditampilkan ke user -- baik di dropdown
+  // pilih sheet, auto-detect sheet bulan berjalan, maupun daftar mana pun
+  // yang dibangun dari state.availableSheets.
   const sheetNames = meta.sheets
     .filter(s => !s.properties.hidden && s.properties.title !== RIWAYAT_LOG_SHEET_NAME)
     .map(s => s.properties.title);
@@ -743,6 +747,9 @@ async function applySheetStructureToState(struct, sheetName) {
   state.activeSheetHeaderRow = struct.headerRow1;
   state.lastSaldoRow = struct.lastSaldoRow1;
   state.saldoAkhirRow = struct.saldoAkhirRow1;
+  // Disimpan utuh (rows/headerRow/lastFilled) supaya modul notifikasi bisa
+  // scan kolom Tanggal & Nomor Faktur tanpa fetch ulang ke Sheets API.
+  state.lastSheetStruct = struct;
 
   // "Saldo bulan lalu" = Saldo Akhir (kolom biru) sheet bulan sebelumnya,
   // dibaca otomatis dari spreadsheet. Fallback ke F7 sheet aktif kalau sheet
@@ -803,6 +810,7 @@ async function loadActiveSheetContext(overrideSheetName) {
     }
 
     state.activeSheetName = targetName;
+    state.currentMonthSheetMissing = sheetMissing; // dipakai modul notifikasi ("sheet bulan ini belum dibuat")
     refreshSheetLockUI();
 
     const struct = await readSheetStructure(targetName);
@@ -811,6 +819,8 @@ async function loadActiveSheetContext(overrideSheetName) {
     if (sheetMissing && state.autoCreatePromptDismissedFor !== sheetMissing) {
       openCreateSheetModal(sheetMissing);
     }
+
+    refreshLightNotifications();
   } catch (e) {
     console.error(e);
     toast(e.message || 'Gagal membaca spreadsheet.', 'error');
@@ -3034,6 +3044,261 @@ function setupCekFisikPage() {
   });
 }
 
+/* =========================================================================
+   NOTIFIKASI — pengingat otomatis di lonceng topbar
+   4 jenis: (1) belum ajukan cek fisik bulan ini, (2) nomor faktur lompat
+   di sheet aktif, (3) sheet bulan baru belum dibuat, (4) belum input
+   pemakaian cek fisik hari ini (muncul setelah jam 16:30, persist sampai
+   ada input atau hari berganti).
+   Item (1)(3)(4) dihitung ringan & otomatis tiap kali sheet aktif selesai
+   dimuat. Item (2) sengaja BUKAN otomatis (butuh scan seluruh baris sheet)
+   -- baru dihitung saat user membuka panel lonceng, biar buka app tetap
+   ringan.
+   ========================================================================= */
+
+/** True kalau tanggal (Date) jatuh di hari kalender yang sama dengan sekarang. */
+function isSameLocalDay(date, ref = new Date()) {
+  return date.getFullYear() === ref.getFullYear()
+    && date.getMonth() === ref.getMonth()
+    && date.getDate() === ref.getDate();
+}
+
+/**
+ * Parse sel tanggal mentah dari sheet (format lokal umum: "16/07/2026",
+ * "16-07-2026", atau serial number Google Sheets) jadi Date. Mengembalikan
+ * null kalau tidak bisa diparse -- dipakai buat scan "sudah ada input hari
+ * ini di sheet?" secara toleran terhadap variasi format.
+ */
+function parseSheetDateCell(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number') {
+    // serial date Google Sheets (basis 1899-12-30)
+    const ms = Math.round((raw - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [, dd, mm, yyyy] = m;
+    if (yyyy.length === 2) yyyy = '20' + yyyy;
+    const d = new Date(parseInt(yyyy, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    const [, yyyy, mm, dd] = m;
+    const d = new Date(parseInt(yyyy, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/** Cek apakah ada baris di sheet aktif (kolom Tanggal = index 1) yang bertanggal hari ini. */
+function sheetHasTodayEntry() {
+  if (!state.lastSheetStruct) return false;
+  const { rows, headerRow, lastFilled } = state.lastSheetStruct;
+  for (let i = headerRow + 2; i <= lastFilled; i++) {
+    const r = rows[i];
+    if (!r || !r[1]) continue;
+    const d = parseSheetDateCell(r[1]);
+    if (d && isSameLocalDay(d)) return true;
+  }
+  return false;
+}
+
+/** Cek apakah ada entri riwayat "Tulis Sheet" (import/manual) yang dibuat hari ini. */
+function sessionLogHasTodayEntry() {
+  return state.sessionLog.some(item => item.time instanceof Date && isSameLocalDay(item.time));
+}
+
+/** Cek apakah sudah ada email permohonan cek fisik terkirim yang periodenya mencakup bulan berjalan. */
+function cfEmailSentForCurrentMonth() {
+  const now = new Date();
+  const label = `${bulanLongCapitalized(now.getMonth())} ${now.getFullYear()}`;
+  return state.cfEmailLog.some(item => (item.periode || '').includes(label));
+}
+
+/**
+ * Bangun notifikasi item (1)(3)(4) -- semuanya murah dihitung (tidak perlu
+ * fetch tambahan), dipakai untuk badge otomatis begitu sheet aktif selesai
+ * dimuat, TANPA menunggu user membuka panel lonceng.
+ */
+function computeLightNotifications() {
+  const items = [];
+  const now = new Date();
+
+  // (1) belum ajukan cek fisik bulan ini
+  if (!cfEmailSentForCurrentMonth()) {
+    items.push({
+      id: 'cf-belum-ajukan',
+      tone: 'amber',
+      icon: 'mail',
+      title: 'Belum ajukan cek fisik bulan ini',
+      desc: `Permohonan cek fisik periode ${bulanLongCapitalized(now.getMonth())} ${now.getFullYear()} belum tercatat terkirim.`,
+      action: { nav: 'cekfisik' },
+    });
+  }
+
+  // (3) sheet bulan baru belum dibuat
+  if (state.currentMonthSheetMissing) {
+    items.push({
+      id: 'sheet-belum-dibuat',
+      tone: 'rust',
+      icon: 'sheet',
+      title: 'Sheet bulan ini belum dibuat',
+      desc: `Sheet "${currentMonthSheetName()}" belum ada di spreadsheet -- data bulan berjalan belum punya tempat tersimpan.`,
+      action: { openCreateSheet: true },
+    });
+  }
+
+  // (4) belum input hari ini, hanya relevan setelah jam 16:30
+  const pastCutoff = now.getHours() > 16 || (now.getHours() === 16 && now.getMinutes() >= 30);
+  if (pastCutoff && !sessionLogHasTodayEntry() && !sheetHasTodayEntry()) {
+    items.push({
+      id: 'belum-input-harian',
+      tone: 'amber',
+      icon: 'clock',
+      title: 'Belum ada input pemakaian cek fisik hari ini',
+      desc: 'Sudah lewat jam 16:30 dan belum ada Cek Fisik Keluar/Masuk yang tercatat untuk hari ini.',
+      action: { nav: 'home' },
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Scan kolom Nomor Faktur Penjualan di sheet aktif dan deteksi lompatan
+ * memakai getFakturSegments yang sama dipakai fitur import. Sengaja hanya
+ * dipanggil saat panel notifikasi dibuka (bukan otomatis saat login) karena
+ * perlu menyusun ulang seluruh rentang faktur sheet aktif.
+ */
+function computeFakturGapNotification() {
+  if (!state.lastSheetStruct) return null;
+  const { rows, headerRow, lastFilled } = state.lastSheetStruct;
+
+  const fakturs = [];
+  for (let i = headerRow + 2; i <= lastFilled; i++) {
+    const r = rows[i];
+    if (r && r[2]) fakturs.push(String(r[2]).trim());
+  }
+  if (fakturs.length < 2) return null;
+
+  const sorted = [...fakturs].sort((a, b) => extractFakturNum(a) - extractFakturNum(b));
+  const segments = getFakturSegments(sorted);
+  if (segments.length <= 1) return null; // tidak ada lompatan
+
+  const gapTexts = [];
+  for (let i = 0; i < segments.length - 1; i++) {
+    const gapStart = segments[i][1] + 1;
+    const gapEnd = segments[i + 1][0] - 1;
+    gapTexts.push(gapStart === gapEnd
+      ? String(gapStart).padStart(4, '0')
+      : `${String(gapStart).padStart(4, '0')}-${String(gapEnd).padStart(4, '0')}`);
+  }
+
+  return {
+    id: 'faktur-lompat',
+    tone: 'rust',
+    icon: 'gap',
+    title: 'Ada nomor faktur yang melompat',
+    desc: `Nomor ${gapTexts.join(', ')} belum tercatat di sheet "${state.activeSheetName}" -- cek lagi apakah memang belum diinput atau salah ketik.`,
+    action: { nav: 'home' },
+  };
+}
+
+const NOTIF_ICONS = {
+  mail: '<path d="M3 5h18v14H3z" stroke="currentColor" stroke-width="2"/><path d="M4 7l7.4 5.6a1 1 0 001.2 0L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  sheet: '<path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 9h6M9 13h6M9 17h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  clock: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  gap: '<path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M10.3 3.9L2.6 18a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+};
+
+function renderNotifBadge() {
+  const bell = $('#btnNotifBell');
+  const badge = $('#notifBadge');
+  const count = state.notifItems.length;
+  if (count > 0) {
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.classList.remove('hidden');
+    bell.classList.add('has-alert');
+  } else {
+    badge.classList.add('hidden');
+    bell.classList.remove('has-alert');
+  }
+}
+
+/** Hitung ulang notifikasi "ringan" (tanpa scan faktur) dan perbarui badge. Dipanggil begitu sheet aktif selesai dimuat. */
+function refreshLightNotifications() {
+  state.notifItems = computeLightNotifications();
+  renderNotifBadge();
+}
+
+function renderNotifList() {
+  const area = $('#notifListArea');
+  if (!area) return;
+  if (!state.notifItems.length) {
+    area.innerHTML = `
+      <div class="notif-empty">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Semua aman, tidak ada pengingat saat ini.</span>
+      </div>`;
+    return;
+  }
+  area.innerHTML = `<div class="notif-list">${state.notifItems.map((n, i) => `
+    <button type="button" class="notif-item" data-notif-idx="${i}">
+      <div class="notif-item-icon tone-${n.tone}"><svg viewBox="0 0 24 24" fill="none">${NOTIF_ICONS[n.icon] || ''}</svg></div>
+      <div class="notif-item-body">
+        <div class="notif-item-title">${escapeHtml(n.title)}</div>
+        <div class="notif-item-desc">${escapeHtml(n.desc)}</div>
+      </div>
+      <svg class="notif-item-chevron" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>`).join('')}</div>`;
+}
+
+function handleNotifItemClick(n) {
+  closeModal('#notifModal');
+  if (!n.action) return;
+  if (n.action.nav) {
+    const navBtn = document.querySelector(`.nav-btn[data-nav="${n.action.nav}"]`);
+    if (navBtn) navBtn.click();
+  } else if (n.action.openCreateSheet) {
+    openCreateSheetModal(currentMonthSheetName());
+  }
+}
+
+async function openNotifPanel() {
+  // tampilkan dulu apa yang sudah dihitung (item ringan), sambil scan faktur
+  // berjalan di background -- panel tidak nge-block/nunggu kosong dulu.
+  renderNotifList();
+  openModal('#notifModal');
+
+  if (!state.notifGapChecked) {
+    const area = $('#notifListArea');
+    const hadItemsBefore = state.notifItems.length > 0;
+    if (!hadItemsBefore) {
+      area.innerHTML = `<div class="notif-loading"><span class="spinner" style="width:16px;height:16px;border-width:2px;"></span> Memeriksa urutan nomor faktur…</div>`;
+    }
+    const gapItem = computeFakturGapNotification();
+    state.notifGapChecked = true;
+    if (gapItem) state.notifItems = [gapItem, ...state.notifItems];
+    renderNotifBadge();
+    renderNotifList();
+  }
+}
+
+function setupNotifPanel() {
+  $('#btnNotifBell').addEventListener('click', openNotifPanel);
+  $('#notifListArea').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-notif-idx]');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.notifIdx, 10);
+    const n = state.notifItems[idx];
+    if (n) handleNotifItemClick(n);
+  });
+}
+
 function openModal(sel) {
   const backdrop = $(sel);
   const sheet = backdrop.querySelector('.modal-sheet');
@@ -3369,6 +3634,7 @@ function init() {
   setupCreateSheetModal();
   setupAkunPage();
   setupCekFisikPage();
+  setupNotifPanel();
   setupModalDrag();
   setupModalCloseButtons();
   setupTabs();
