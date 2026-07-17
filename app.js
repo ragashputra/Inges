@@ -3178,14 +3178,30 @@ function computeFakturGapNotification() {
   if (!state.lastSheetStruct) return null;
   const { rows, headerRow, lastFilled } = state.lastSheetStruct;
 
+  // PENTING: beda dengan faktur hasil parse CSV (selalu bersih/terstandar),
+  // sel mentah di sheet asli bisa berisi placeholder ("-", spasi, catatan
+  // manual, dll) yang BUKAN nomor faktur sama sekali. Kalau ikut dihitung,
+  // extractFakturNum mengembalikan 0 untuk semuanya -> dianggap "nomor 0"
+  // yang berulang -> algoritma segmen membaca itu sebagai puluhan lompatan
+  // palsu. Makanya di sini cuma sel yang BENAR-BENAR cocok pola nomor
+  // faktur (diawali angka lalu "/") yang dipakai; sisanya diabaikan diam-diam
+  // (bukan dianggap "hilang"), dan nomor duplikat juga disaring supaya tidak
+  // membuat segmen tumpang-tindih.
+  const seenNum = new Set();
   const fakturs = [];
   for (let i = headerRow + 2; i <= lastFilled; i++) {
     const r = rows[i];
-    if (r && r[2]) fakturs.push(String(r[2]).trim());
+    if (!r || !r[2]) continue;
+    const raw = String(r[2]).trim();
+    const num = extractFakturNum(raw);
+    if (num <= 0) continue;         // bukan format nomor faktur yang valid -> lewati
+    if (seenNum.has(num)) continue; // nomor duplikat -> lewati, hindari segmen tumpang-tindih
+    seenNum.add(num);
+    fakturs.push(raw);
   }
   if (fakturs.length < 2) return null;
 
-  const sorted = [...fakturs].sort((a, b) => extractFakturNum(a) - extractFakturNum(b));
+  const sorted = fakturs.sort((a, b) => extractFakturNum(a) - extractFakturNum(b));
   const segments = getFakturSegments(sorted);
   if (segments.length <= 1) return null; // tidak ada lompatan
 

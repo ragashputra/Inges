@@ -154,15 +154,15 @@ input,select,textarea{font-family:inherit;}
 }
 .notif-bell{
   position:relative; flex-shrink:0;
-  width:38px; height:38px; border-radius:11px; border:1px solid var(--line-soft);
+  width:42px; height:42px; border-radius:12px; border:1.5px solid var(--line);
   background:var(--glass-bg); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
   display:flex; align-items:center; justify-content:center; cursor:pointer;
   color:var(--paper-dim);
   transition:all var(--dur-fast) var(--ease-out);
 }
-.notif-bell svg{width:19px; height:19px;}
+.notif-bell svg{width:21px; height:21px;}
 .notif-bell:active{transform:scale(0.92); background:var(--ink-2);}
-.notif-bell.has-alert{color:var(--amber);}
+.notif-bell.has-alert{color:var(--amber); border-color:rgba(212,162,76,0.45);}
 .notif-bell.has-alert svg{animation:bellRing 2.6s ease-in-out infinite;}
 @keyframes bellRing{
   0%,72%,100%{transform:rotate(0deg);}
