@@ -73,6 +73,8 @@ const state = {
   riwayatTab: 'sheet', // tab aktif di halaman Riwayat: 'sheet' atau 'email'
   riwayatLogSheetId: null,  // sheetId (gid) tab tersembunyi '_RiwayatApp', diisi begitu dicek/dibuat sekali per sesi
   riwayatSyncing: false,
+  riwayatSelectMode: false,       // true kalau mode "Pilih" (hapus beberapa sekaligus) sedang aktif
+  riwayatSelectedIds: new Set(),  // id riwayat yang sedang dicentang (khusus tab yang lagi dilihat)
 
   // ---- Cek Fisik (email permohonan) ----
   cfToEmail: CF_TO_EMAIL_DEFAULT,
@@ -2085,6 +2087,16 @@ function clearSessionLog() {
   localStorage.removeItem(STORAGE_KEYS.sessionLog);
   renderSessionLog();
   toast('Riwayat berhasil dihapus.', 'success');
+  clearRiwayatCloudRowsByType('sheet'); // fire-and-forget, biar tidak "muncul lagi" pas sync dari device lain
+}
+
+/** Hapus SATU entri riwayat Tulis Sheet (bukan semua) berdasarkan id-nya. */
+function deleteSessionLogEntry(id) {
+  state.sessionLog = state.sessionLog.filter(item => item.id !== id);
+  saveSessionLog();
+  renderSessionLog();
+  toast('Riwayat dihapus.', 'success', 1800);
+  deleteRiwayatCloudRowById(id); // fire-and-forget
 }
 
 function renderSessionLog() {
@@ -2097,7 +2109,8 @@ function renderSessionLog() {
   const bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
   const listHTML = state.sessionLog.length
     ? state.sessionLog.map(item => `
-      <div class="day-row" style="margin-bottom:8px;">
+      <div class="day-row${state.riwayatSelectedIds.has(item.id) ? ' selected' : ''}" data-id="${item.id || ''}" style="margin-bottom:8px;">
+        <div class="riwayat-select-check"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="day-date">
           <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
           <span>${item.time.getDate()} ${bulanSingkat[item.time.getMonth()]}</span>
@@ -2106,6 +2119,9 @@ function renderSessionLog() {
           <div class="faktur-range">${item.desc}</div>
           <div class="unit-count">${item.type === 'import' ? 'Cek Fisik Keluar' : 'Cek Fisik Masuk'}</div>
         </div>
+        <button class="riwayat-row-remove" data-del-id="${item.id || ''}" aria-label="Hapus riwayat ini">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m2 0v13a2 2 0 01-2 2H8a2 2 0 01-2-2V7h12z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
     `).join('')
     : emptyHTML;
@@ -2164,6 +2180,16 @@ function clearCfEmailLog() {
   localStorage.removeItem(STORAGE_KEYS.cfEmailLog);
   renderCfEmailLog();
   toast('Riwayat email berhasil dihapus.', 'success');
+  clearRiwayatCloudRowsByType('email'); // fire-and-forget, biar tidak "muncul lagi" pas sync dari device lain
+}
+
+/** Hapus SATU entri riwayat Email Cek Fisik (bukan semua) berdasarkan id-nya. */
+function deleteCfEmailLogEntry(id) {
+  state.cfEmailLog = state.cfEmailLog.filter(item => item.id !== id);
+  saveCfEmailLog();
+  renderCfEmailLog();
+  toast('Riwayat dihapus.', 'success', 1800);
+  deleteRiwayatCloudRowById(id); // fire-and-forget
 }
 
 /* ---------------- Sinkronisasi Riwayat lintas perangkat (via tab tersembunyi di Sheets) ---------------- */
@@ -2284,6 +2310,48 @@ function mergeLogEntries(localArr, remoteRows, maxEntries) {
 }
 
 /**
+ * Cari & KOSONGKAN (bukan delete-dimension) baris di tab cloud '_RiwayatApp'
+ * yang cocok dengan predikat. Baris dikosongkan (bukan baris sheet-nya yang
+ * dihapus) supaya index baris lain tidak ikut geser — lebih aman kalau ada
+ * dua device menghapus/menulis riwayat hampir bersamaan. Baris kosong nanti
+ * otomatis diabaikan diam-diam oleh mergeLogEntries (JSON.parse gagal -> skip).
+ * Fire-and-forget: kalau gagal (offline dll), hapus lokal tetap berhasil —
+ * cuma berisiko entrinya "muncul lagi" nanti pas sync dari cloud.
+ */
+async function clearRiwayatCloudRows(predicate) {
+  try {
+    if (!state.spreadsheetId || !state.accessToken) return;
+    await ensureRiwayatLogSheet();
+    const res = await sheetsFetch(`${state.spreadsheetId}/values/${encodeURIComponent(RIWAYAT_LOG_READ_RANGE)}`);
+    const rows = res.values || [];
+    const ranges = [];
+    rows.forEach((r, idx) => {
+      if (predicate(r)) ranges.push(`'${RIWAYAT_LOG_SHEET_NAME}'!A${idx + 2}:C${idx + 2}`); // +2: range mulai dari baris A2
+    });
+    if (!ranges.length) return;
+    await sheetsFetch(`${state.spreadsheetId}/values:batchClear`, {
+      method: 'POST',
+      body: JSON.stringify({ ranges }),
+    });
+  } catch (e) {
+    console.error('Gagal menghapus riwayat di cloud (hapus lokal tetap berhasil):', e);
+  }
+}
+
+/** Hapus satu entri riwayat (tipe sheet ATAU email) di cloud berdasarkan id-nya. */
+function deleteRiwayatCloudRowById(id) {
+  if (!id) return;
+  clearRiwayatCloudRows((r) => {
+    try { return JSON.parse(r[2])?.id === id; } catch (e) { return false; }
+  });
+}
+
+/** Hapus semua entri riwayat satu tipe ('sheet' atau 'email') sekaligus di cloud. */
+function clearRiwayatCloudRowsByType(tipe) {
+  clearRiwayatCloudRows((r) => r[1] === tipe);
+}
+
+/**
  * Sinkronkan Riwayat (Tulis Sheet & Email Cek Fisik) dengan tab cloud.
  * Dipanggil tiap kali halaman Riwayat dibuka: tampilan lokal (cache) sudah
  * langsung kelihatan instan, lalu diam-diam disamakan dengan data cloud
@@ -2328,7 +2396,8 @@ function renderCfEmailLog() {
   const bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
   const listHTML = state.cfEmailLog.length
     ? state.cfEmailLog.map((item, idx) => `
-      <div class="day-row email-log-row" data-idx="${idx}" style="margin-bottom:8px;">
+      <div class="day-row email-log-row${state.riwayatSelectedIds.has(item.id) ? ' selected' : ''}" data-idx="${idx}" data-id="${item.id || ''}" style="margin-bottom:8px;">
+        <div class="riwayat-select-check"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="day-date">
           <b>${item.time.getHours().toString().padStart(2,'0')}:${item.time.getMinutes().toString().padStart(2,'0')}</b>
           <span>${item.time.getDate()} ${bulanSingkat[item.time.getMonth()]}</span>
@@ -2342,6 +2411,9 @@ function renderCfEmailLog() {
           </div>` : ''}
           <div class="unit-count">${formatNum(item.totalLembar || 0)} lembar cek fisik &middot; Kepada ${escapeHtml(item.toEmail || '—')}</div>
         </div>
+        <button class="riwayat-row-remove" data-del-id="${item.id || ''}" aria-label="Hapus riwayat ini">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m2 0v13a2 2 0 01-2 2H8a2 2 0 01-2-2V7h12z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <svg class="row-chevron" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
     `).join('')
@@ -2394,6 +2466,8 @@ function setupRiwayatEmailDetail() {
   const listEl = $('#riwayatEmailList');
   if (!listEl) return;
   listEl.addEventListener('click', (e) => {
+    if (state.riwayatSelectMode) return; // di mode "Pilih", klik baris ditangani setupRiwayatSelection
+    if (e.target.closest('.riwayat-row-remove')) return; // tombol hapus tidak ikut membuka detail
     const row = e.target.closest('.email-log-row');
     if (!row) return;
     openEmailLogDetail(parseInt(row.dataset.idx, 10));
@@ -2401,18 +2475,186 @@ function setupRiwayatEmailDetail() {
 }
 
 /**
+ * Hapus SATU entri riwayat (bukan semua) — dipicu dari tombol tempat sampah
+ * di tiap baris. Event delegation di container list, jadi tetap jalan
+ * walau isi list di-render ulang berkali-kali (innerHTML diganti total tiap
+ * renderSessionLog/renderCfEmailLog).
+ */
+function setupRiwayatRowDelete() {
+  const sheetList = $('#riwayatList');
+  if (sheetList) {
+    sheetList.addEventListener('click', (e) => {
+      if (state.riwayatSelectMode) return; // di mode "Pilih", klik baris ditangani setupRiwayatSelection
+      const btn = e.target.closest('.riwayat-row-remove');
+      if (!btn) return;
+      const id = btn.dataset.delId;
+      if (!id) return;
+      if (confirm('Hapus riwayat ini? Tindakan ini tidak bisa dibatalkan.')) {
+        deleteSessionLogEntry(id);
+      }
+    });
+  }
+
+  const emailList = $('#riwayatEmailList');
+  if (emailList) {
+    emailList.addEventListener('click', (e) => {
+      if (state.riwayatSelectMode) return; // di mode "Pilih", klik baris ditangani setupRiwayatSelection
+      const btn = e.target.closest('.riwayat-row-remove');
+      if (!btn) return;
+      const id = btn.dataset.delId;
+      if (!id) return;
+      if (confirm('Hapus riwayat email ini? Tindakan ini tidak bisa dibatalkan.')) {
+        deleteCfEmailLogEntry(id);
+      }
+    });
+  }
+}
+
+/**
  * Sinkronkan tampilan/label tombol "Hapus Riwayat" dengan tab yang sedang
  * aktif di halaman Riwayat -- tombol hilang kalau daftar tab aktif kosong,
  * dan yang dihapus cuma riwayat tab yang sedang dilihat, bukan keduanya
  * sekaligus (biar tidak ada kejadian "Hapus Riwayat" nge-hapus data yang
- * sedang tidak dilihat orangnya).
+ * sedang tidak dilihat orangnya). Sekarang juga merangkap menyinkronkan
+ * seluruh tampilan mode "Pilih" (checkbox, bar aksi, dll) supaya semua
+ * pemanggil lama (renderSessionLog/renderCfEmailLog/dst) otomatis ikut update.
  */
 function updateClearHistoryBtnVisibility() {
-  const btn = $('#btnClearHistory');
-  if (!btn) return;
-  const activeLen = state.riwayatTab === 'email' ? state.cfEmailLog.length : state.sessionLog.length;
-  btn.classList.toggle('hidden', activeLen === 0);
+  updateRiwayatSelectUI();
 }
+
+/**
+ * Mode "Pilih" di halaman Riwayat — supaya user bisa menghapus beberapa
+ * riwayat tertentu sekaligus (bukan cuma satu-satu lewat ikon tempat sampah,
+ * atau semuanya sekaligus lewat "Hapus Riwayat"). Berlaku terpisah untuk
+ * masing-masing tab (Tulis Sheet / Email Cek Fisik) — pindah tab otomatis
+ * keluar dari mode Pilih supaya tidak ada seleksi "nyangkut" dari tab lain.
+ */
+function enterRiwayatSelectMode() {
+  state.riwayatSelectMode = true;
+  state.riwayatSelectedIds.clear();
+  renderSessionLog();
+  renderCfEmailLog();
+}
+
+function exitRiwayatSelectMode() {
+  state.riwayatSelectMode = false;
+  state.riwayatSelectedIds.clear();
+  renderSessionLog();
+  renderCfEmailLog();
+}
+
+function toggleRiwayatRowSelected(id) {
+  if (state.riwayatSelectedIds.has(id)) state.riwayatSelectedIds.delete(id);
+  else state.riwayatSelectedIds.add(id);
+  if (state.riwayatTab === 'email') renderCfEmailLog(); else renderSessionLog();
+}
+
+function toggleSelectAllRiwayat() {
+  const list = state.riwayatTab === 'email' ? state.cfEmailLog : state.sessionLog;
+  const allSelected = list.length > 0 && list.every(item => state.riwayatSelectedIds.has(item.id));
+  if (allSelected) {
+    list.forEach(item => state.riwayatSelectedIds.delete(item.id));
+  } else {
+    list.forEach(item => state.riwayatSelectedIds.add(item.id));
+  }
+  if (state.riwayatTab === 'email') renderCfEmailLog(); else renderSessionLog();
+}
+
+/** Hapus semua riwayat yang sedang dicentang di tab yang sedang dilihat. */
+function deleteSelectedRiwayat() {
+  const count = state.riwayatSelectedIds.size;
+  if (!count) { toast('Belum ada riwayat yang dipilih.', 'success', 1800); return; }
+  if (!confirm(`Hapus ${count} riwayat terpilih? Tindakan ini tidak bisa dibatalkan.`)) return;
+
+  const idsToDelete = new Set(state.riwayatSelectedIds);
+  if (state.riwayatTab === 'email') {
+    state.cfEmailLog = state.cfEmailLog.filter(item => !idsToDelete.has(item.id));
+    saveCfEmailLog();
+  } else {
+    state.sessionLog = state.sessionLog.filter(item => !idsToDelete.has(item.id));
+    saveSessionLog();
+  }
+  idsToDelete.forEach(id => deleteRiwayatCloudRowById(id)); // fire-and-forget, sinkron ke cloud satu-satu
+
+  toast(`${count} riwayat dihapus.`, 'success', 1800);
+  state.riwayatSelectMode = false;
+  state.riwayatSelectedIds.clear();
+  renderSessionLog();
+  renderCfEmailLog();
+}
+
+/** Sinkronkan seluruh tampilan mode Pilih: tombol toggle, checkbox per baris, dan bar aksi bawah. */
+function updateRiwayatSelectUI() {
+  const toggleBtn = $('#btnRiwayatSelectToggle');
+  const selectBar = $('#riwayatSelectBar');
+  const clearBtn = $('#btnClearHistory');
+  const sheetList = $('#riwayatList');
+  const emailList = $('#riwayatEmailList');
+  const countEl = $('#riwayatSelectCount');
+  const selectAllBtn = $('#btnRiwayatSelectAll');
+  const deleteBtn = $('#btnRiwayatDeleteSelected');
+
+  const active = state.riwayatSelectMode;
+  const list = state.riwayatTab === 'email' ? state.cfEmailLog : state.sessionLog;
+  const hasItems = list.length > 0;
+
+  if (toggleBtn) {
+    toggleBtn.classList.toggle('active', active);
+    toggleBtn.classList.toggle('hidden', !hasItems && !active);
+    toggleBtn.innerHTML = active
+      ? '<svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Batal'
+      : '<svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Pilih';
+  }
+
+  if (sheetList) sheetList.classList.toggle('select-mode', active);
+  if (emailList) emailList.classList.toggle('select-mode', active);
+
+  if (selectBar) selectBar.classList.toggle('hidden', !active);
+  if (clearBtn) clearBtn.classList.toggle('hidden', active || !hasItems);
+
+  if (countEl) countEl.textContent = `${state.riwayatSelectedIds.size} dipilih`;
+
+  if (selectAllBtn) {
+    const allSelected = hasItems && list.every(item => state.riwayatSelectedIds.has(item.id));
+    selectAllBtn.textContent = allSelected ? 'Batal Semua' : 'Pilih Semua';
+  }
+
+  if (deleteBtn) deleteBtn.disabled = state.riwayatSelectedIds.size === 0;
+}
+
+function setupRiwayatSelection() {
+  const sheetList = $('#riwayatList');
+  const emailList = $('#riwayatEmailList');
+
+  const handleSelectClick = (e) => {
+    if (!state.riwayatSelectMode) return;
+    const row = e.target.closest('.day-row');
+    if (!row) return;
+    const id = row.dataset.id;
+    if (!id) return;
+    toggleRiwayatRowSelected(id);
+  };
+
+  if (sheetList) sheetList.addEventListener('click', handleSelectClick);
+  if (emailList) emailList.addEventListener('click', handleSelectClick);
+
+  const btnToggle = $('#btnRiwayatSelectToggle');
+  if (btnToggle) {
+    btnToggle.addEventListener('click', () => {
+      if (state.riwayatSelectMode) exitRiwayatSelectMode();
+      else enterRiwayatSelectMode();
+    });
+  }
+
+  const btnSelectAll = $('#btnRiwayatSelectAll');
+  if (btnSelectAll) btnSelectAll.addEventListener('click', toggleSelectAllRiwayat);
+
+  const btnDeleteSelected = $('#btnRiwayatDeleteSelected');
+  if (btnDeleteSelected) btnDeleteSelected.addEventListener('click', deleteSelectedRiwayat);
+}
+
+
 
 /** Sub-tab "Tulis Sheet" vs "Email Cek Fisik" di halaman Riwayat. */
 function setupRiwayatTabs() {
@@ -2432,7 +2674,11 @@ function setupRiwayatTabs() {
     listSheet.classList.toggle('hidden', isEmail);
     const activeChip = isEmail ? chipEmail : chipSheet;
     if (desc && activeChip.dataset.desc) desc.textContent = activeChip.dataset.desc;
-    updateClearHistoryBtnVisibility();
+    // Pindah tab -> keluar dari mode "Pilih" biar seleksi tidak nyangkut lintas tab
+    state.riwayatSelectMode = false;
+    state.riwayatSelectedIds.clear();
+    renderSessionLog();
+    renderCfEmailLog();
   };
 
   chipSheet.addEventListener('click', () => activate('sheet'));
@@ -3670,6 +3916,8 @@ function init() {
   renderCfEmailLog();
   setupRiwayatTabs();
   setupRiwayatEmailDetail();
+  setupRiwayatRowDelete();
+  setupRiwayatSelection();
   initGoogleAuth();
 
   if ('serviceWorker' in navigator) {
