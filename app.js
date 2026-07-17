@@ -3062,9 +3062,10 @@ function renderCekFisikPage() {
 }
 
 /**
- * Isi opsi dropdown "Nama Unit Usaha" & "Pilih Unit Usaha" (di bawah Nama
- * Pengurusan -> SO) dari satu daftar SO_UNIT_LIST yang sama, supaya kedua
- * dropdown itu selalu konsisten kalau daftarnya diubah di kemudian hari.
+ * Isi opsi dropdown "Nama Unit Usaha Anda" & "Pilih Unit Usaha Perbantuan
+ * Pengurusan" (di bawah Lokasi Pengurusan -> SO) dari satu daftar
+ * SO_UNIT_LIST yang sama, supaya kedua dropdown itu selalu konsisten kalau
+ * daftarnya diubah di kemudian hari.
  */
 function populateSoDropdowns() {
   const optionsHTML = SO_UNIT_LIST.map(so => `<option value="${so}">${so}</option>`).join('');
@@ -3076,8 +3077,8 @@ function populateSoDropdowns() {
 }
 
 /**
- * "Nama Pengurusan" -> pilih RRO (langsung final) atau SO (perlu pilih lagi
- * unit usahanya lewat dropdown kedua yang baru muncul).
+ * "Lokasi Pengurusan" -> pilih RRO/KRO (langsung final) atau SO (perlu
+ * pilih lagi unit usahanya lewat dropdown kedua yang baru muncul).
  */
 function setupCfViaKategori() {
   const kategoriEl = $('#cfViaKategori');
@@ -3131,12 +3132,12 @@ function cfBuildSubject() {
   return `Permohonan Cek Fisik Pengurusan ke ${kota} periode Bulan ${periodeText}`;
 }
 
-/** Nilai dropdown "Nama Unit Usaha" apa adanya, mis. "SO PGR". */
+/** Nilai dropdown "Nama Unit Usaha Anda" apa adanya, mis. "SO PGR". */
 function cfNamaSOFull() {
   return $('#cfNamaSO').value.trim() || 'NAMA UNIT USAHA';
 }
 
-/** Gabungkan "Nama Pengurusan": RRO langsung dipakai, SO ambil dari dropdown kedua (mis. "SO PGR"). */
+/** Gabungkan "Lokasi Pengurusan": RRO/KRO langsung dipakai, SO ambil dari dropdown kedua (mis. "SO PGR"). */
 function cfViaFull() {
   const kategori = $('#cfViaKategori').value.trim();
   if (kategori === 'SO') return $('#cfViaSO').value.trim() || 'SO';
@@ -3178,12 +3179,12 @@ function cfValidateForm() {
   if (state.cfToEditing) errors.push('Selesaikan dulu (centang ✓) edit alamat Kepada sebelum mengirim.');
   if (state.cfCcList.some(c => c.editing)) errors.push('Selesaikan dulu (centang ✓) edit alamat CC sebelum mengirim.');
   if (!state.cfToEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.cfToEmail)) errors.push('Alamat email Kepada belum valid.');
-  if (!$('#cfNamaSO').value.trim()) errors.push('Nama Unit Usaha belum dipilih.');
+  if (!$('#cfNamaSO').value.trim()) errors.push('Nama Unit Usaha Anda belum dipilih.');
   if (!$('#cfNamaPengirim').value.trim()) errors.push('Nama Pengirim belum diisi.');
   if (!$('#cfKotaTujuan').value.trim()) errors.push('Kota Pengurusan belum diisi.');
   const viaKategori = $('#cfViaKategori').value.trim();
-  if (!viaKategori) errors.push('Nama Pengurusan belum dipilih.');
-  if (viaKategori === 'SO' && !$('#cfViaSO').value.trim()) errors.push('Unit usaha untuk Nama Pengurusan (SO) belum dipilih.');
+  if (!viaKategori) errors.push('Lokasi Pengurusan belum dipilih.');
+  if (viaKategori === 'SO' && !$('#cfViaSO').value.trim()) errors.push('Unit usaha untuk Lokasi Pengurusan (SO) belum dipilih.');
   if (state.cfMonthRows.length === 0) errors.push('Tambahkan minimal satu baris bulan.');
   const hasValidUnit = state.cfMonthRows.some(r => (parseInt(r.unit, 10) || 0) > 0);
   if (!hasValidUnit) errors.push('Isi jumlah unit di minimal satu baris bulan.');
